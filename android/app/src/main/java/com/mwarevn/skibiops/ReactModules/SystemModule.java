@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops.rmodule;
+package com.mwarevn.skibiops.ReactModules;
 
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
@@ -9,6 +9,7 @@ import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.util.Base64;
+import android.util.Log;
 
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -63,6 +64,7 @@ public class SystemModule extends ReactContextBaseJavaModule {
                 appMap.putInt("versionCode", pkg.versionCode);
                 appMap.putBoolean("isSystemApp", (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0);
                 appMap.putBoolean("isUpdatedSystemApp", (appInfo.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0);
+                appMap.putBoolean("enabled", appInfo.enabled);
 
                 // ✅ Lấy icon app -> Base64
                 try {

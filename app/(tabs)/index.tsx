@@ -1,94 +1,150 @@
+import AppItem from "@/components/AppItem";
 import LayoutScreen from "@/components/ui/LayoutScreen";
-import React from "react";
-import { FlatList, Image, StyleSheet, Text, View } from "react-native";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { useNavigation } from "@react-navigation/native";
+import React, { useLayoutEffect, useState } from "react";
+import { Alert, FlatList, Text, TouchableOpacity, View } from "react-native";
 
 import { NativeModules } from "react-native";
+import { NativeStackNavigationProp } from "react-native-screens/lib/typescript/native-stack/types";
+import { Toast } from "toastify-react-native";
 const { SystemModule, ShizukuModule } = NativeModules;
 
-SystemModule.getMessage().then((msg: string) => {
-  console.log(msg);
-});
+// SystemModule.getMessage().then((msg: string) => {
+//     console.log(msg);
+// });
+type RootStackParamList = {
+    MyScreen: undefined;
+    OtherScreen: { id: string };
+};
 
 export default function AppsScreen() {
-  const [apps, setApps] = React.useState<any>([]);
+    const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+    const [selectedApps, setSelectedApps] = useState([]);
 
-  React.useEffect(() => {
-    async function loadApps() {
-      try {
-        const list = await SystemModule.getInstalledApps();
-        console.log("Total apps:", list.length);
-        setApps(list);
-      } catch (e) {
-        console.error("Error loading apps:", e);
-      }
-    }
+    useLayoutEffect(() => {
+        navigation.setOptions({
+            headerRight:
+                selectedApps.length === 0
+                    ? null
+                    : () => (
+                          <View style={{ flexDirection: "row", display: "flex", alignItems: "center" }}>
+                              <Text style={{ fontWeight: "bold" }}>{selectedApps.length} selected</Text>
 
-    loadApps();
-  }, []);
+                              <TouchableOpacity
+                                  onPress={async () => {
+                                      const dis = await ShizukuModule.killBackgroundProcesses(
+                                          "com.mirfatif.permissionmanagerx"
+                                      );
 
-  React.useEffect(() => {
-    async function check() {
-      const available = await ShizukuModule.isShizukuAvailable();
-      console.log("Shizuku available:", available);
+                                      console.log({ dis });
+                                  }}
+                                  style={{ marginHorizontal: 8, padding: 10, borderRadius: 1000, backgroundColor: "#dbdbdb50" }}
+                              >
+                                  <Ionicons name={"ban-outline"} color="grey" size={25} />
+                              </TouchableOpacity>
 
-      const has = await ShizukuModule.hasPermission();
-      console.log("Has Shizuku permission:", has);
+                              <TouchableOpacity
+                                  onPress={() => console.log("Pressed")}
+                                  style={{ marginRight: 8, padding: 10, borderRadius: 1000, backgroundColor: "#dbdbdb50" }}
+                              >
+                                  <Ionicons name={"trash"} color="red" size={25} />
+                              </TouchableOpacity>
+                          </View>
+                      ),
+        } as any);
+    }, [selectedApps]);
 
-      if (!has) {
-        console.log("Requesting permission...");
-        ShizukuModule.requestPermission();
-      }
-    }
+    const [apps, setApps] = React.useState<any>([]);
 
-    check();
-  }, []);
+    React.useEffect(() => {
+        async function loadApps() {
+            try {
+                const list = await SystemModule.getInstalledApps();
+                console.log("Total apps:", list.length);
+                setApps(list);
+            } catch (e) {
+                console.error("Error loading apps:", e);
+            }
+        }
 
-  return (
-    <LayoutScreen>
-      <FlatList
-        data={apps}
-        renderItem={({ item }) => {
-          return (
-            <View style={styles.item}>
-              {item.iconBase64 ? (
-                <Image
-                  source={{ uri: `data:image/png;base64,${item.iconBase64}` }}
-                  style={styles.icon}
+        loadApps();
+    }, []);
+
+    React.useEffect(() => {
+        async function check() {
+            const available = await ShizukuModule.isShizukuAvailable();
+
+            if (!available) {
+                Alert.alert(
+                    "Error",
+                    "Ứng dụng này yêu cầu cần có app 'Shizuku' để hoạt động được. Vui lòng tải nó từ Play Store.",
+                    [
+                        {
+                            text: "Tải về",
+                            onPress: () => {},
+                        },
+                        {
+                            text: "Bỏ qua",
+                            onPress: () => null,
+                        },
+                    ]
+                );
+            }
+
+            let has = await ShizukuModule.hasPermission();
+
+            if (!has) {
+                let result = null;
+                Alert.alert("Error", "Vui lòng ủy quyền Shizuku cho ứng dụng này!", [
+                    {
+                        text: "Ủy quyền",
+                        onPress: async () => {
+                            result = await ShizukuModule.requestPermission();
+
+                            if (!result) {
+                                Toast.show({
+                                    type: "error",
+                                    text1: "Lỗi",
+                                    text2: "Vui lòng ủy quyền Shizuku cho ứng dụng này!",
+                                    onPress: async () => {
+                                        await ShizukuModule.requestPermission();
+                                    },
+                                });
+                            }
+                        },
+                    },
+                    {
+                        text: "Bỏ qua",
+                        onPress: () => null,
+                    },
+                ]);
+
+                has = await ShizukuModule.hasPermission();
+
+                console.log("Has Shizuku permission:", has);
+            } else {
+                console.log("Has Shizuku permission:", has);
+            }
+        }
+
+        check();
+    }, []);
+
+    return (
+        <LayoutScreen>
+            <Text>Total: {apps.length} apps</Text>
+            {apps.length === 0 ? (
+                <Text>Loading...</Text>
+            ) : (
+                <FlatList
+                    data={apps}
+                    renderItem={({ item }) => (
+                        <AppItem item={item} setSelectedApps={setSelectedApps} selectedApps={selectedApps} />
+                    )}
+                    keyExtractor={(item) => item.packageName}
                 />
-              ) : (
-                <View style={[styles.icon, { backgroundColor: "#ccc" }]} />
-              )}
-              <View>
-                <Text style={styles.name}>{item.appName}</Text>
-                <Text style={styles.pkg}>{item.packageName}</Text>
-              </View>
-            </View>
-          );
-        }}
-        keyExtractor={(item) => item.packageName}
-      />
-    </LayoutScreen>
-  );
+            )}
+        </LayoutScreen>
+    );
 }
-
-const styles = StyleSheet.create({
-  item: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 10,
-  },
-  icon: {
-    width: 40,
-    height: 40,
-    marginRight: 10,
-    borderRadius: 8,
-  },
-  name: {
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  pkg: {
-    fontSize: 12,
-    color: "#666",
-  },
-});

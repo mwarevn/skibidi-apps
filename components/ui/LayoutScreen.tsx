@@ -2,14 +2,11 @@ import React from "react";
 import { View } from "react-native";
 
 export default function LayoutScreen({ children }: any) {
-  return (
-    <View
-      style={{
-        backgroundColor: "#2a2a2aff",
-        height: "100%",
-      }}
-    >
-      {children}
-    </View>
-  );
+    return (
+        <View style={{ flex: 1 }}>
+            <View style={{ flex: 1 }}>{children}</View>
+
+            <View style={{ height: 64 }}>{/* Phần trên cố định 120px */}</View>
+        </View>
+    );
 }

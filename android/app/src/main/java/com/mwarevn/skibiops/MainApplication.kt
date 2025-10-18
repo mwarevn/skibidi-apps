@@ -16,8 +16,7 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
-import com.mwarevn.skibiops.rpackage.SystemPackage
-import com.mwarevn.skibiops.rpackage.ShizukuPackage
+import com.mwarevn.skibiops.ReactPackages.SystemPackage
 
 import rikka.shizuku.Shizuku
 
@@ -31,7 +30,7 @@ class MainApplication : Application(), ReactApplication {
               // Packages that cannot be autolinked yet can be added manually here, for example:
               // add(MyReactNativePackage())
               add(SystemPackage())
-              add(ShizukuPackage())
+//              add(ShizukuPackage())
             }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
