@@ -33,9 +33,7 @@ export default function AppsScreen() {
 
                               <TouchableOpacity
                                   onPress={async () => {
-                                      const dis = await ShizukuModule.killBackgroundProcesses(
-                                          "com.mirfatif.permissionmanagerx"
-                                      );
+                                      const dis = await ShizukuModule.disablePackage("com.google.android.googlequicksearchbox");
 
                                       console.log({ dis });
                                   }}

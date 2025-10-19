@@ -191,7 +191,7 @@ public class ShizukuModule extends ReactContextBaseJavaModule {
         try {
             boolean isSystemApp = isSystemApp(packageName);
             checkShizukuAccess(isSystemApp); // Require root for system apps
-            if (isSystemApp(packageName) && Shizuku.checkSelfPermission() != 0) {
+            if (isSystemApp && Shizuku.checkSelfPermission() != 0) {
                 throw new Exception("Uninstalling system apps requires root access");
             }
 
@@ -320,17 +320,6 @@ public class ShizukuModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void isPackageEnabled(String packageName, Promise promise) {
-        try {
-            checkShizukuAccess(false); // No need for root to check status
-            boolean enabled = isPackageEnabled(packageName);
-            promise.resolve(enabled);
-        } catch (Exception e) {
-            promise.reject("CHECK_ENABLED_ERROR", "Failed to check package enabled state: " + e.getMessage(), e);
-        }
-    }
-
-    @ReactMethod
     public void isShizukuAvailable(Promise promise) {
         try {
             boolean available = Shizuku.pingBinder();
@@ -349,7 +338,6 @@ public class ShizukuModule extends ReactContextBaseJavaModule {
             promise.reject("ERR_SHIZUKU_PERMISSION", "Failed to check Shizuku permission: " + e.getMessage(), e);
         }
     }
-
     @ReactMethod
     public void requestPermission(Promise promise) {
         Activity current = reactContext.getCurrentActivity();
@@ -370,7 +358,6 @@ public class ShizukuModule extends ReactContextBaseJavaModule {
             promise.reject("ERR_SHIZUKU_PERMISSION", "Failed to request Shizuku permission: " + e.getMessage(), e);
         }
     }
-
     @ReactMethod
     public void addListener(String eventName) {}
     @ReactMethod

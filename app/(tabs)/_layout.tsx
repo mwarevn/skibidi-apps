@@ -1,8 +1,9 @@
 import "react-native-reanimated";
 
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Animated, StyleSheet, TouchableOpacity } from "react-native";
+import { StyleSheet, TouchableOpacity } from "react-native";
 import { CurvedBottomBarExpo } from "react-native-curved-bottom-bar";
+import Animated from "react-native-reanimated";
 import { Toast } from "toastify-react-native";
 import AppsScreen from ".";
 import SettingScreen from "./SettingScreen";
@@ -41,7 +42,7 @@ export default function TabLayout() {
 
     return (
         <CurvedBottomBarExpo.Navigator
-            type="UP"
+            type="DOWN"
             style={styles.bottomBar}
             shadowStyle={styles.shawdow}
             height={64}
