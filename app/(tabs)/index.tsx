@@ -8,7 +8,7 @@ import { Alert, FlatList, Text, TouchableOpacity, View } from "react-native";
 import { NativeModules } from "react-native";
 import { NativeStackNavigationProp } from "react-native-screens/lib/typescript/native-stack/types";
 import { Toast } from "toastify-react-native";
-const { SystemModule, ShizukuModule } = NativeModules;
+const { SystemModule, ShizukuModule, AppManager } = NativeModules;
 
 // SystemModule.getMessage().then((msg: string) => {
 //     console.log(msg);
@@ -22,6 +22,17 @@ export default function AppsScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const [selectedApps, setSelectedApps] = useState([]);
 
+    async function loadApps() {
+        try {
+            const list = await SystemModule.getInstalledApps();
+            console.log("Total apps:", list.length);
+            setApps(list);
+        } catch (e) {
+            console.error("Error loading apps:", e);
+        }
+    }
+
+    // Set up header options based on selected apps (disable/trash)
     useLayoutEffect(() => {
         navigation.setOptions({
             headerRight:
@@ -33,18 +44,69 @@ export default function AppsScreen() {
 
                               <TouchableOpacity
                                   onPress={async () => {
-                                      const dis = await ShizukuModule.disablePackage("com.google.android.googlequicksearchbox");
+                                      //   const dis = await AppManager.disablePackage(
+                                      //       "com.google.android.googlequicksearchbox"
+                                      //   );
 
-                                      console.log({ dis });
+                                      // Tôi muốn sau khi bấm nút này thì sẽ disable tất cả các app đã chọn trong selectedApps và load lại danh sách apps và nếu có lỗi disibale app nào thì cũng không ảnh hưởng tới việc dissable các app khác
+
+                                      const results = await Promise.all(
+                                          selectedApps.map((pkg: any) =>
+                                              AppManager.disablePackage(pkg.packageName)
+                                                  .then((res: any) => ({
+                                                      pkg: pkg.packageName,
+                                                      status: "fulfilled",
+                                                      res,
+                                                  }))
+                                                  .catch((err: any) => ({
+                                                      pkg: pkg.packageName,
+                                                      status: "rejected",
+                                                      reason: err,
+                                                  }))
+                                          )
+                                      );
+
+                                      const failures = results.filter((r: any) => r.status === "rejected");
+
+                                      if (failures.length > 0) {
+                                          console.error("Some packages failed to disable:", failures);
+                                          Toast.show({
+                                              type: "error",
+                                              text1: "Lỗi",
+                                              text2: `${failures.length} package(s) không thể vô hiệu hoá.`,
+                                          });
+                                      } else {
+                                          Toast.show({
+                                              type: "success",
+                                              text1: "Hoàn tất",
+                                              text2: "Đã vô hiệu hoá tất cả package đã chọn.",
+                                          });
+                                      }
+
+                                      // Clear selection and reload apps regardless of individual failures
+
+                                      await loadApps().finally(() => {
+                                          setSelectedApps([]);
+                                      });
                                   }}
-                                  style={{ marginHorizontal: 8, padding: 10, borderRadius: 1000, backgroundColor: "#dbdbdb50" }}
+                                  style={{
+                                      marginHorizontal: 8,
+                                      padding: 10,
+                                      borderRadius: 1000,
+                                      backgroundColor: "#dbdbdb50",
+                                  }}
                               >
                                   <Ionicons name={"ban-outline"} color="grey" size={25} />
                               </TouchableOpacity>
 
                               <TouchableOpacity
                                   onPress={() => console.log("Pressed")}
-                                  style={{ marginRight: 8, padding: 10, borderRadius: 1000, backgroundColor: "#dbdbdb50" }}
+                                  style={{
+                                      marginRight: 8,
+                                      padding: 10,
+                                      borderRadius: 1000,
+                                      backgroundColor: "#dbdbdb50",
+                                  }}
                               >
                                   <Ionicons name={"trash"} color="red" size={25} />
                               </TouchableOpacity>
@@ -56,16 +118,6 @@ export default function AppsScreen() {
     const [apps, setApps] = React.useState<any>([]);
 
     React.useEffect(() => {
-        async function loadApps() {
-            try {
-                const list = await SystemModule.getInstalledApps();
-                console.log("Total apps:", list.length);
-                setApps(list);
-            } catch (e) {
-                console.error("Error loading apps:", e);
-            }
-        }
-
         loadApps();
     }, []);
 
@@ -126,8 +178,8 @@ export default function AppsScreen() {
             }
         }
 
-        check();
-    }, []);
+        apps.length > 0 && check();
+    }, [apps]);
 
     return (
         <LayoutScreen>

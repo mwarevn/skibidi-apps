@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops.ReactModules;
+package com.mwarevn.skibiops.react.modules;
 
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
@@ -9,7 +9,6 @@ import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.util.Base64;
-import android.util.Log;
 
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.ReactApplicationContext;

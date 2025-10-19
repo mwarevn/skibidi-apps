@@ -1,13 +1,18 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 
 export default function AppItem({ item, setSelectedApps, selectedApps }: any) {
-    const [isSelected, setIsSelected] = useState(false);
+    // const [isSelected, setIsSelected] = useState(false);
 
-    useEffect(() => {
-        isSelected && setSelectedApps([...selectedApps, item]);
-        !isSelected && setSelectedApps([...selectedApps.filter((i: any) => i.packageName !== item.packageName)]);
-    }, [isSelected]);
+    // useEffect(() => {
+    //     isSelected && setSelectedApps([...selectedApps, item]);
+    //     !isSelected && setSelectedApps([...selectedApps.filter((i: any) => i.packageName !== item.packageName)]);
+    // }, [isSelected]);
+
+    const isSelected = selectedApps.find((i: any) => i.packageName === item.packageName);
+
+    useEffect(() => {}, [selectedApps]);
+
     return (
         <Pressable
             style={{ backgroundColor: isSelected ? "red" : "transparent" }}
@@ -15,7 +20,11 @@ export default function AppItem({ item, setSelectedApps, selectedApps }: any) {
                 // setIsSelected(true);
             }}
             onPress={() => {
-                setIsSelected(!isSelected);
+                if (isSelected) {
+                    setSelectedApps(selectedApps.filter((i: any) => i.packageName !== item.packageName));
+                } else {
+                    setSelectedApps([...selectedApps, item]);
+                }
             }}
         >
             <View

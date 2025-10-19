@@ -1,4 +1,3 @@
-import CustomToast from "@/components/CustomToast";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { DarkTheme, DefaultTheme, ThemeProvider } from "@react-navigation/native";
 import { Stack } from "expo-router";
@@ -13,11 +12,11 @@ export const unstable_settings = {
 export default function RootLayout() {
     const colorScheme = useColorScheme();
     const toastConfig = {
-        custom: (props: any) => <CustomToast {...props} />,
-        success: (props: any) => <CustomToast {...props} />,
-        error: (props: any) => <CustomToast {...props} />,
-        info: (props: any) => <CustomToast {...props} />,
-        warning: (props: any) => <CustomToast {...props} />,
+        // custom: (props: any) => <CustomToast {...props} />,
+        // success: (props: any) => <CustomToast {...props} />,
+        // error: (props: any) => <CustomToast {...props} />,
+        // info: (props: any) => <CustomToast {...props} />,
+        // warning: (props: any) => <CustomToast {...props} />,
     };
 
     return (
