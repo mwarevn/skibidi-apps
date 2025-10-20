@@ -42,7 +42,7 @@ export default function TabLayout() {
 
     return (
         <CurvedBottomBarExpo.Navigator
-            type="DOWN"
+            type="UP"
             style={styles.bottomBar}
             shadowStyle={styles.shawdow}
             height={64}

@@ -1,18 +1,15 @@
 import AppItem from "@/components/AppItem";
 import LayoutScreen from "@/components/ui/LayoutScreen";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { useNavigation } from "@react-navigation/native";
-import React, { useLayoutEffect, useState } from "react";
-import { Alert, FlatList, Text, TouchableOpacity, View } from "react-native";
-
-import { NativeModules } from "react-native";
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Alert, FlatList, NativeModules, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { NativeStackNavigationProp } from "react-native-screens/lib/typescript/native-stack/types";
 import { Toast } from "toastify-react-native";
 const { SystemModule, ShizukuModule, AppManager } = NativeModules;
 
-// SystemModule.getMessage().then((msg: string) => {
-//     console.log(msg);
-// });
 type RootStackParamList = {
     MyScreen: undefined;
     OtherScreen: { id: string };
@@ -20,7 +17,17 @@ type RootStackParamList = {
 
 export default function AppsScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-    const [selectedApps, setSelectedApps] = useState([]);
+    const [selectedApps, setSelectedApps] = useState<any[]>([]);
+    const [apps, setApps] = useState<any[]>([]);
+    const [search, setSearch] = useState("");
+
+    // ref
+    const bottomSheetRef = useRef<BottomSheet>(null);
+
+    // callbacks
+    const handleSheetChanges = useCallback((index: number) => {
+        console.log("handleSheetChanges", index);
+    }, []);
 
     async function loadApps() {
         try {
@@ -31,6 +38,13 @@ export default function AppsScreen() {
             console.error("Error loading apps:", e);
         }
     }
+
+    // filtered list by packageName (case-insensitive)
+    const filteredApps = useMemo(() => {
+        if (!search || search.trim() === "") return apps;
+        const q = search.toLowerCase();
+        return apps.filter((a: any) => (a.packageName || "").toLowerCase().includes(q));
+    }, [apps, search]);
 
     // Set up header options based on selected apps (disable/trash)
     useLayoutEffect(() => {
@@ -44,12 +58,6 @@ export default function AppsScreen() {
 
                               <TouchableOpacity
                                   onPress={async () => {
-                                      //   const dis = await AppManager.disablePackage(
-                                      //       "com.google.android.googlequicksearchbox"
-                                      //   );
-
-                                      // Tôi muốn sau khi bấm nút này thì sẽ disable tất cả các app đã chọn trong selectedApps và load lại danh sách apps và nếu có lỗi disibale app nào thì cũng không ảnh hưởng tới việc dissable các app khác
-
                                       const results = await Promise.all(
                                           selectedApps.map((pkg: any) =>
                                               AppManager.disablePackage(pkg.packageName)
@@ -114,8 +122,6 @@ export default function AppsScreen() {
                       ),
         } as any);
     }, [selectedApps]);
-
-    const [apps, setApps] = React.useState<any>([]);
 
     React.useEffect(() => {
         loadApps();
@@ -183,18 +189,67 @@ export default function AppsScreen() {
 
     return (
         <LayoutScreen>
-            <Text>Total: {apps.length} apps</Text>
-            {apps.length === 0 ? (
-                <Text>Loading...</Text>
-            ) : (
-                <FlatList
-                    data={apps}
-                    renderItem={({ item }) => (
-                        <AppItem item={item} setSelectedApps={setSelectedApps} selectedApps={selectedApps} />
-                    )}
-                    keyExtractor={(item) => item.packageName}
+            <GestureHandlerRootView style={styles.container}>
+                <Text style={{ marginLeft: 10 }}>Total: {apps.length} apps</Text>
+
+                <TextInput
+                    value={search}
+                    onChangeText={setSearch}
+                    placeholder="Search by package name..."
+                    style={styles.search}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    clearButtonMode="while-editing"
                 />
-            )}
+
+                {apps.length === 0 ? (
+                    <Text>Loading...</Text>
+                ) : filteredApps.length === 0 ? (
+                    <Text>No results for "{search}"</Text>
+                ) : (
+                    <FlatList
+                        data={filteredApps}
+                        renderItem={({ item }) => (
+                            <AppItem item={item} setSelectedApps={setSelectedApps} selectedApps={selectedApps} />
+                        )}
+                        keyExtractor={(item) => item.packageName}
+                    />
+                )}
+
+                <BottomSheet
+                    detached={true}
+                    enablePanDownToClose={true}
+                    enableDynamicSizing={true}
+                    snapPoints={[200, "80%"]}
+                    ref={bottomSheetRef}
+                    onChange={handleSheetChanges}
+                >
+                    <BottomSheetView style={styles.contentContainer}>
+                        <Text>Awesome</Text>
+                    </BottomSheetView>
+                </BottomSheet>
+            </GestureHandlerRootView>
         </LayoutScreen>
     );
 }
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: "transparent",
+    },
+    contentContainer: {
+        flex: 1,
+        paddingBottom: 64,
+        alignItems: "center",
+    },
+    search: {
+        height: 40,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: "#ddd",
+        paddingHorizontal: 10,
+        marginBottom: 8,
+        marginHorizontal: 8,
+    },
+});

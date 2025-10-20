@@ -16,9 +16,7 @@ export default function AppItem({ item, setSelectedApps, selectedApps }: any) {
     return (
         <Pressable
             style={{ backgroundColor: isSelected ? "red" : "transparent" }}
-            onLongPress={() => {
-                // setIsSelected(true);
-            }}
+            onLongPress={() => {}}
             onPress={() => {
                 if (isSelected) {
                     setSelectedApps(selectedApps.filter((i: any) => i.packageName !== item.packageName));
