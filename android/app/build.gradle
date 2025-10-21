@@ -83,12 +83,12 @@ def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 android {
 
-    sourceSets {
-        main {
-            java.srcDirs = ['src/main/java']
-            aidl.srcDirs = ['src/main/aidl']  // Khai báo AIDL source
-        }
-    }
+//    sourceSets {
+//        main {
+//            java.srcDirs = ['src/main/java']
+//            aidl.srcDirs = ['src/main/aidl/com/mwarevn/skibiops']  // Khai báo AIDL source
+//        }
+//    }
 
     // QUAN TRỌNG: Cấu hình build features
     buildFeatures {

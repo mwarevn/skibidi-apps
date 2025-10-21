@@ -6,23 +6,23 @@ import { CurvedBottomBarExpo } from "react-native-curved-bottom-bar";
 import Animated from "react-native-reanimated";
 import { Toast } from "toastify-react-native";
 import AppsScreen from ".";
-import SettingScreen from "./SettingScreen";
+import PermissionManager from "./PermissionManager";
 
 export default function TabLayout() {
     const screens = [
         {
             name: "apps-screen",
-            title: "Ếu lều",
+            title: "App Manager",
             icon: "logo-windows",
             position: "LEFT",
             component: <AppsScreen />,
         },
         {
-            name: "setting-screen",
-            title: "Cài đặt",
+            name: "permission-manager",
+            title: "Quản lý quyền",
             icon: "key",
             position: "RIGHT",
-            component: <SettingScreen />,
+            component: <PermissionManager />,
         },
     ];
 
@@ -42,7 +42,7 @@ export default function TabLayout() {
 
     return (
         <CurvedBottomBarExpo.Navigator
-            type="UP"
+            type="DOWN"
             style={styles.bottomBar}
             shadowStyle={styles.shawdow}
             height={64}

@@ -1,6 +1,8 @@
 package com.mwarevn.skibiops.react.modules;
 
 import android.app.Activity;
+import android.content.pm.PackageManager;
+
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
@@ -65,9 +67,13 @@ public class ShizukuModule extends ReactContextBaseJavaModule {
             Shizuku.requestPermission(REQUEST_CODE);
             Shizuku.addRequestPermissionResultListener((requestCode, result) -> {
                 if (requestCode == REQUEST_CODE) {
-                    promise.resolve(Shizuku.checkSelfPermission() == 0);
+                    promise.resolve(Shizuku.checkSelfPermission() == REQUEST_CODE);
+                } else {
+                    promise.reject("ERR_SHIZUKU_PERMISSION", "Unexpected request code: " + requestCode);
                 }
             });
+
+
         } catch (Exception e) {
             promise.reject("ERR_SHIZUKU_PERMISSION", "Failed to request Shizuku permission: " + e.getMessage(), e);
         }

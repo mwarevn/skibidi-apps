@@ -1,5 +1,6 @@
 package com.mwarevn.skibiops.react.modules;
 
+import android.annotation.SuppressLint;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -81,6 +82,60 @@ public class SystemModule extends ReactContextBaseJavaModule {
 
         } catch (Exception e) {
             promise.reject("ERR_GET_APPS", e);
+        }
+    }
+
+    @SuppressLint("WrongConstant")
+    @ReactMethod
+    public void getAllApps(Promise promise) {
+        try {
+            PackageManager pm = reactContext.getPackageManager();
+            List<PackageInfo> packages;
+            int flags = PackageManager.GET_META_DATA |
+                    PackageManager.GET_DISABLED_COMPONENTS |
+                    PackageManager.MATCH_ALL |
+                    PackageManager.GET_SIGNING_CERTIFICATES;
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packages = pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(flags));
+            } else {
+                packages = pm.getInstalledPackages(flags);
+            }
+
+            WritableArray appList = Arguments.createArray();
+
+            for (PackageInfo pkg : packages) {
+//                if (pkg.applicationInfo == null) continue;
+
+                ApplicationInfo appInfo = pkg.applicationInfo;
+
+                WritableMap appMap = Arguments.createMap();
+                appMap.putString("appName", pm.getApplicationLabel(appInfo).toString());
+                appMap.putString("packageName", pkg.packageName);
+                appMap.putString("versionName", pkg.versionName != null ? pkg.versionName : "N/A");
+                appMap.putInt("versionCode", pkg.versionCode);
+                appMap.putBoolean("isSystemApp", (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0);
+                appMap.putBoolean("isUpdatedSystemApp", (appInfo.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0);
+                appMap.putBoolean("enabled", appInfo.enabled);  // Sẽ true/false cho Android Auto
+                appMap.putDouble("firstInstallTime", pkg.firstInstallTime);
+                appMap.putDouble("lastUpdateTime", pkg.lastUpdateTime);
+
+                // Icon Base64
+                try {
+                    Drawable icon = pm.getApplicationIcon(appInfo);
+                    String base64Icon = drawableToBase64(icon);
+                    appMap.putString("iconBase64", base64Icon);
+                } catch (Exception e) {
+                    appMap.putString("iconBase64", null);
+                }
+
+                appList.pushMap(appMap);
+            }
+
+            promise.resolve(appList);
+
+        } catch (Exception e) {
+            promise.reject("ERR_GET_ALL_APPS", e.getMessage());
         }
     }
 
