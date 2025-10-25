@@ -278,7 +278,7 @@ export default function AppsScreen() {
     return (
         <LayoutScreen>
             <GestureHandlerRootView style={styles.container}>
-                <View style={{ backgroundColor: "#fff" }}>
+                <View style={{ backgroundColor: "#fff", display: "none" }}>
                     <View style={{ flexDirection: "row", alignItems: "center", marginLeft: 10 }}>
                         <Text>Total: {apps.length} apps</Text>
                         <Text

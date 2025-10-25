@@ -12,7 +12,7 @@ export default function TabLayout() {
     const screens = [
         {
             name: "apps-screen",
-            title: "App Manager",
+            title: "Skibiops",
             icon: "logo-windows",
             position: "LEFT",
             component: <AppsScreen />,
@@ -22,7 +22,7 @@ export default function TabLayout() {
         },
         {
             name: "permission-manager",
-            title: "Permission Manager",
+            title: "Skibiops",
             icon: "key",
             position: "RIGHT",
             component: <PermissionManager />,
