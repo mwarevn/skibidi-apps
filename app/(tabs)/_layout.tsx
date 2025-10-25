@@ -16,10 +16,13 @@ export default function TabLayout() {
             icon: "logo-windows",
             position: "LEFT",
             component: <AppsScreen />,
+            options: {
+                headerShadowVisible: false,
+            },
         },
         {
             name: "permission-manager",
-            title: "Quản lý quyền",
+            title: "Permission Manager",
             icon: "key",
             position: "RIGHT",
             component: <PermissionManager />,
@@ -78,6 +81,7 @@ export default function TabLayout() {
                         options={{
                             headerTitle: screen.title,
                             headerShown: true,
+                            ...screen.options,
                         }}
                     />
                 );

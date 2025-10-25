@@ -4,10 +4,11 @@ import AppManagerWrapper from "@/utils/appManager";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from "@gorhom/bottom-sheet";
 import { useNavigation } from "@react-navigation/native";
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    AppState,
     FlatList,
     Image,
     NativeModules,
@@ -20,7 +21,7 @@ import {
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { NativeStackNavigationProp } from "react-native-screens/lib/typescript/native-stack/types";
 import { Toast } from "toastify-react-native";
-const { SystemModule, ShizukuModule, AppManager } = NativeModules;
+const { SystemModule, ShizukuModule } = NativeModules;
 
 type RootStackParamList = {
     MyScreen: undefined;
@@ -29,14 +30,57 @@ type RootStackParamList = {
 
 export default function AppsScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
     const [selectedApps, setSelectedApps] = useState<any[]>([]);
     const [selectedApp, setSelectedApp] = useState<any | null>(null);
     const [apps, setApps] = useState<any[]>([]);
     const [loading, setLoading] = useState<boolean>(false);
     const [search, setSearch] = useState("");
+    const [shizukuAvailable, setShizukuAvailable] = useState<boolean | null>(null);
+    const [shizukuHasPermission, setShizukuHasPermission] = useState<boolean | null>(null);
+
+    const SHIZUKU_PKG = "moe.shizuku.privileged.api";
+
+    const openPlayStore = useCallback((pkg = SHIZUKU_PKG) => {
+        try {
+            const { Linking } = require("react-native");
+            const playUrl = `market://details?id=${pkg}`;
+            const webUrl = `https://play.google.com/store/apps/details?id=${pkg}`;
+            Linking.openURL(playUrl).catch(() => Linking.openURL(webUrl));
+        } catch (err) {
+            console.warn("Failed to open Play Store", err);
+        }
+    }, []);
+
+    const runBatchAction = useCallback(
+        async (items: any[], action: (pkg: string) => Promise<any>, successMsg: string, failMsg: string) => {
+            const results = await Promise.all(
+                items.map((pkg: any) =>
+                    action(pkg.packageName)
+                        .then((res: any) => ({ pkg: pkg.packageName, status: "fulfilled", res }))
+                        .catch((err: any) => ({ pkg: pkg.packageName, status: "rejected", reason: err }))
+                )
+            );
+
+            const failures = results.filter((r: any) => r.status === "rejected");
+
+            if (failures.length > 0) {
+                console.error(failures);
+                Toast.show({ type: "error", text1: "Lỗi", text2: `${failures.length} package(s) ${failMsg}` });
+            } else {
+                Toast.show({ type: "success", text1: "Hoàn tất", text2: successMsg });
+            }
+
+            await loadApps().finally(() => setSelectedApps([]));
+        },
+        []
+    );
 
     // ref
     const bottomSheetRef = useRef<BottomSheet>(null);
+    const listRef = useRef<FlatList<any> | null>(null);
+    const [refreshing, setRefreshing] = useState(false);
+    const [showScrollTop, setShowScrollTop] = useState(false);
 
     // callbacks
     const handleSheetChanges = useCallback(
@@ -73,6 +117,17 @@ export default function AppsScreen() {
         }
     }
 
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        try {
+            await loadApps();
+        } catch (e) {
+            console.warn(e);
+        } finally {
+            setRefreshing(false);
+        }
+    }, []);
+
     // filtered list by packageName (case-insensitive)
     const filteredApps = useMemo(() => {
         if (!search || search.trim() === "") return apps;
@@ -87,50 +142,18 @@ export default function AppsScreen() {
                 selectedApps.length === 0
                     ? null
                     : () => (
-                          <View style={{ flexDirection: "row", display: "flex", alignItems: "center" }}>
+                          <View style={{ flexDirection: "row", alignItems: "center" }}>
                               <Text style={{ fontWeight: "bold" }}>{selectedApps.length} selected</Text>
 
                               <TouchableOpacity
-                                  onPress={async () => {
-                                      const results = await Promise.all(
-                                          selectedApps.map((pkg: any) =>
-                                              AppManagerWrapper.uninstallPackage(pkg.packageName)
-                                                  .then((res: any) => ({
-                                                      pkg: pkg.packageName,
-                                                      status: "fulfilled",
-                                                      res,
-                                                  }))
-                                                  .catch((err: any) => ({
-                                                      pkg: pkg.packageName,
-                                                      status: "rejected",
-                                                      reason: err,
-                                                  }))
-                                          )
-                                      );
-
-                                      const failures = results.filter((r: any) => r.status === "rejected");
-
-                                      if (failures.length > 0) {
-                                          console.error("Some packages failed to disable:", failures);
-                                          Toast.show({
-                                              type: "error",
-                                              text1: "Lỗi",
-                                              text2: `${failures.length} package(s) không thể vô hiệu hoá.`,
-                                          });
-                                      } else {
-                                          Toast.show({
-                                              type: "success",
-                                              text1: "Hoàn tất",
-                                              text2: "Đã vô hiệu hoá tất cả package đã chọn.",
-                                          });
-                                      }
-
-                                      // Clear selection and reload apps regardless of individual failures
-
-                                      await loadApps().finally(() => {
-                                          setSelectedApps([]);
-                                      });
-                                  }}
+                                  onPress={() =>
+                                      runBatchAction(
+                                          selectedApps,
+                                          AppManagerWrapper.disablePackage,
+                                          "Đã vô hiệu hoá tất cả package đã chọn.",
+                                          "không thể vô hiệu hoá."
+                                      )
+                                  }
                                   style={{
                                       marginHorizontal: 8,
                                       padding: 10,
@@ -142,46 +165,14 @@ export default function AppsScreen() {
                               </TouchableOpacity>
 
                               <TouchableOpacity
-                                  onPress={async () => {
-                                      const results = await Promise.all(
-                                          selectedApps.map((pkg: any) =>
-                                              AppManagerWrapper.uninstallPackage(pkg.packageName)
-                                                  .then((res: any) => ({
-                                                      pkg: pkg.packageName,
-                                                      status: "fulfilled",
-                                                      res,
-                                                  }))
-                                                  .catch((err: any) => ({
-                                                      pkg: pkg.packageName,
-                                                      status: "rejected",
-                                                      reason: err,
-                                                  }))
-                                          )
-                                      );
-
-                                      const failures = results.filter((r: any) => r.status === "rejected");
-
-                                      if (failures.length > 0) {
-                                          console.error("Some packages failed to uninstall:", failures);
-                                          Toast.show({
-                                              type: "error",
-                                              text1: "Lỗi",
-                                              text2: `${failures.length} package(s) không thể gỡ cài đặt.`,
-                                          });
-                                      } else {
-                                          Toast.show({
-                                              type: "success",
-                                              text1: "Hoàn tất",
-                                              text2: "Đã gỡ cài đặt tất cả package đã chọn.",
-                                          });
-                                      }
-
-                                      // Clear selection and reload apps regardless of individual failures
-
-                                      await loadApps().finally(() => {
-                                          setSelectedApps([]);
-                                      });
-                                  }}
+                                  onPress={() =>
+                                      runBatchAction(
+                                          selectedApps,
+                                          AppManagerWrapper.uninstallPackage,
+                                          "Đã gỡ cài đặt tất cả package đã chọn.",
+                                          "không thể gỡ cài đặt."
+                                      )
+                                  }
                                   style={{
                                       marginRight: 8,
                                       padding: 10,
@@ -194,112 +185,128 @@ export default function AppsScreen() {
                           </View>
                       ),
         } as any);
-    }, [selectedApps, navigation]);
+    }, [selectedApps, navigation, runBatchAction]);
 
     React.useEffect(() => {
         loadApps();
     }, []);
 
-    React.useEffect(() => {
-        async function check() {
-            const available = await ShizukuModule.isShizukuAvailable();
-
-            if (!available) {
-                return Alert.alert(
-                    "Error",
-                    "Ứng dụng này yêu cầu cần có app 'Shizuku' để hoạt động được. Vui lòng tải nó từ Play Store.",
-                    [
-                        {
-                            text: "Tải về",
-                            onPress: () => {},
-                        },
-                        {
-                            text: "Bỏ qua",
-                            onPress: () => null,
-                        },
-                    ]
-                );
-            }
-
-            let has = await ShizukuModule.hasPermission();
-
-            if (!has) {
-                let result = null;
-                Alert.alert("Error", "Vui lòng ủy quyền Shizuku cho ứng dụng này!", [
-                    {
-                        text: "Ủy quyền",
-                        onPress: async () => {
-                            result = await ShizukuModule.requestPermission();
-
-                            console.log({ result });
-
-                            if (!result) {
-                                Toast.show({
-                                    type: "error",
-                                    text1: "Lỗi",
-                                    text2: "Vui lòng ủy quyền Shizuku cho ứng dụng này!",
-                                    onPress: async () => {
-                                        const a = await ShizukuModule.requestPermission();
-                                        console.log(a);
-                                    },
-                                });
-                            }
-                            // If permission granted, try to ensure AppManager binding
-                            const bound = await AppManagerWrapper.ensureBound();
-                            console.log("AppManager bound:", bound);
-                        },
-                    },
-                    {
-                        text: "Bỏ qua",
-                        onPress: () => null,
-                    },
-                ]);
-
-                has = await ShizukuModule.hasPermission();
-
-                console.log("Has Shizuku permission:", has);
-            } else {
-                console.log("Has Shizuku permission:", has);
-            }
-        }
-
-        apps.length > 0 && check();
-    }, [apps]);
-
-    // If apps are loaded and permission already exists, proactively ensure AppManager is bound
-    React.useEffect(() => {
-        let mounted = true;
-        (async () => {
+    // consolidated Shizuku check: runs when apps load and when screen focuses
+    const checkShizuku = useCallback(
+        async (showPrompts = true) => {
             try {
-                const has = await ShizukuModule.hasPermission();
-                if (mounted && has) {
-                    const bound = await AppManagerWrapper.ensureBound();
-                    console.log("Proactive bind result:", bound);
+                const available = Boolean(await ShizukuModule.isShizukuAvailable());
+                setShizukuAvailable(available);
+
+                if (!available) {
+                    setShizukuHasPermission(false);
+                    if (showPrompts) {
+                        Alert.alert(
+                            "Yêu cầu Shizuku",
+                            "Ứng dụng này yêu cầu app 'Shizuku' để hoạt động. Vui lòng cài đặt Shizuku từ Play Store.",
+                            [
+                                { text: "Cài đặt", onPress: () => openPlayStore() },
+                                { text: "Bỏ qua", style: "cancel" },
+                            ]
+                        );
+                    }
+                    return;
+                }
+
+                const has = Boolean(await ShizukuModule.hasPermission());
+                setShizukuHasPermission(has);
+
+                if (!has && showPrompts) {
+                    Alert.alert("Yêu cầu ủy quyền", "Vui lòng ủy quyền Shizuku cho ứng dụng này!", [
+                        {
+                            text: "Ủy quyền",
+                            onPress: async () => {
+                                try {
+                                    // requestPermission may open Shizuku UI (external). Don't assume the return value
+                                    // represents the final state; re-check on app resume instead.
+                                    await ShizukuModule.requestPermission();
+                                } catch (err) {
+                                    console.error("Request permission error:", err);
+                                }
+                            },
+                        },
+                        { text: "Bỏ qua", style: "cancel" },
+                    ]);
+                } else if (has) {
+                    await AppManagerWrapper.ensureBound();
                 }
             } catch (err) {
-                console.warn(err);
+                console.warn("Shizuku check failed:", err);
+                setShizukuAvailable(false);
+                setShizukuHasPermission(false);
             }
-        })();
+        },
+        [openPlayStore]
+    );
+
+    React.useEffect(() => {
+        // show prompts once when apps are first loaded so user can install/grant Shizuku
+        if (apps.length > 0) checkShizuku(true);
+    }, [apps, checkShizuku]);
+
+    // Re-check Shizuku when app returns to foreground (onResume behavior)
+    useEffect(() => {
+        const handler = (nextAppState: string) => {
+            if (nextAppState === "active") {
+                // when app becomes active again, re-check and show prompts if needed
+                checkShizuku(true);
+            }
+        };
+
+        // Use (AppState as any) to support different RN versions without TS errors
+        const anyAppState = AppState as any;
+        const sub = anyAppState.addEventListener ? anyAppState.addEventListener("change", handler) : null;
 
         return () => {
-            mounted = false;
+            try {
+                if (sub && typeof sub.remove === "function") {
+                    sub.remove();
+                } else if (anyAppState.removeEventListener) {
+                    anyAppState.removeEventListener("change", handler);
+                }
+            } catch (e) {
+                // ignore
+            }
         };
-    }, [apps]);
+    }, [checkShizuku]);
 
     return (
         <LayoutScreen>
             <GestureHandlerRootView style={styles.container}>
-                <Text style={{ marginLeft: 10 }}>Total: {apps.length} apps</Text>
+                <View style={{ backgroundColor: "#fff" }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", marginLeft: 10 }}>
+                        <Text>Total: {apps.length} apps</Text>
+                        <Text
+                            style={{
+                                marginLeft: 12,
+                                color: shizukuAvailable ? (shizukuHasPermission ? "#2e7d32" : "#f9a825") : "#d32f2f",
+                            }}
+                        >
+                            {shizukuAvailable === null
+                                ? "Checking Shizuku..."
+                                : shizukuAvailable
+                                ? shizukuHasPermission
+                                    ? "Shizuku: Authorized"
+                                    : "Shizuku: Needs Permission"
+                                : "Shizuku: Not Installed"}
+                        </Text>
+                    </View>
 
-                <TextInput
-                    value={search}
-                    onChangeText={setSearch}
-                    placeholder="Search by package name..."
-                    style={styles.search}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    clearButtonMode="while-editing"
-                />
+                    <TextInput
+                        value={search}
+                        onChangeText={setSearch}
+                        placeholder="Search by package name..."
+                        style={styles.search}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        clearButtonMode="while-editing"
+                    />
+                </View>
 
                 {loading ? (
                     <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
@@ -312,7 +319,17 @@ export default function AppsScreen() {
                     <Text>No results for {`"${search}"`}</Text>
                 ) : (
                     <FlatList
+                        ref={(r) => {
+                            listRef.current = r;
+                        }}
                         data={filteredApps}
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        onScroll={({ nativeEvent }) => {
+                            const offsetY = nativeEvent.contentOffset?.y || 0;
+                            setShowScrollTop(offsetY > 200);
+                        }}
+                        scrollEventThrottle={16}
                         renderItem={({ item }) => (
                             <AppItem
                                 item={item}
@@ -328,6 +345,43 @@ export default function AppsScreen() {
                         maxToRenderPerBatch={20}
                     />
                 )}
+
+                {showScrollTop ? (
+                    <TouchableOpacity
+                        onPress={() => {
+                            try {
+                                listRef.current?.scrollToOffset({ offset: 0, animated: true });
+                            } catch (e) {
+                                console.warn(e);
+                            }
+                        }}
+                        style={{
+                            position: "absolute",
+                            right: 16,
+                            bottom: 16,
+                            backgroundColor: "#ffffffbc",
+                            borderRadius: 8,
+                            opacity: 0.85,
+                            width: 42,
+                            height: 42,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+
+                            shadowColor: "#ddd",
+                            shadowOffset: {
+                                width: 0,
+                                height: 1,
+                            },
+                            shadowOpacity: 0.2,
+                            shadowRadius: 1.41,
+                            elevation: 1,
+                        }}
+                    >
+                        {/* <Text style={{ color: "#fff", fontWeight: "bold" }}>↑</Text> */}
+                        <Ionicons name={"arrow-up"} color="#000" size={20} />
+                    </TouchableOpacity>
+                ) : null}
 
                 <BottomSheet
                     index={-1}
@@ -505,11 +559,11 @@ const styles = StyleSheet.create({
     },
     search: {
         height: 40,
-        borderRadius: 14,
-        borderWidth: 1,
+        borderRadius: 8,
+        borderWidth: 0.3,
         borderColor: "#ddd",
         paddingHorizontal: 10,
-        marginBottom: 8,
+        marginVertical: 8,
         marginHorizontal: 8,
     },
 });
