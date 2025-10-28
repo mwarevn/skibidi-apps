@@ -1,6 +1,10 @@
 package com.mwarevn.skibiops.react.modules;
 
 import android.annotation.SuppressLint;
+import android.appwidget.AppWidgetManager;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -18,6 +22,8 @@ import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
+import com.mwarevn.skibiops.R;
+import com.mwarevn.skibiops.widget.Widget;
 
 import java.io.ByteArrayOutputStream;
 import java.util.List;
@@ -38,6 +44,36 @@ public class SystemModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void getMessage(Promise promise) {
         promise.resolve("Xin chào từ Java!");
+    }
+
+    private void updateWidgetAfterDataChange() {
+        AppWidgetManager appWidgetManager = AppWidgetManager.getInstance(reactContext);
+        int[] ids = appWidgetManager.getAppWidgetIds(new ComponentName(reactContext, Widget.class));
+        if (ids.length > 0) {
+            appWidgetManager.notifyAppWidgetViewDataChanged(ids, R.id.list_view);
+        }
+    }
+
+    @ReactMethod
+    public void getListWidgetData(Promise promise) {
+        SharedPreferences sharedPref = reactContext.getSharedPreferences("WIDGET_DATA", Context.MODE_PRIVATE);
+        String jsonData = sharedPref.getString("list_items", "[]");
+        promise.resolve(jsonData);
+    }
+
+    @ReactMethod
+    public void setListWidgetData(String jsonData, Promise promise) {
+        SharedPreferences.Editor editor = reactContext.getSharedPreferences("WIDGET_DATA", Context.MODE_PRIVATE).edit();
+        editor.putString("list_items", jsonData); // jsonData là JSONArray string, ví dụ: [{"title":"Item1"}]
+        editor.apply();
+
+//        updateWidgetAfterDataChange();
+
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            updateWidgetAfterDataChange();
+            promise.resolve(true);
+        }, 100);
+        promise.resolve(true);
     }
 
     @ReactMethod

@@ -1,16 +1,29 @@
 package com.mwarevn.skibiops.react.modules;
 
+import android.appwidget.AppWidgetManager;
+import android.content.BroadcastReceiver;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.RemoteException;
 
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.Promise;
+import com.facebook.react.bridge.WritableMap;
 import com.mwarevn.skibiops.IAppManagerService;
+import com.mwarevn.skibiops.R;
+import com.mwarevn.skibiops.widget.Widget;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import android.util.Log;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
 
 /**
  * Lightweight AppManager module. Binding to Shizuku user service is done by AppManagerBinder
@@ -19,11 +32,93 @@ import android.util.Log;
  */
 public class AppManager extends ReactContextBaseJavaModule {
 
+    private BroadcastReceiver widgetActionReceiver;
     private static final String TAG = "AppManager";
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     public AppManager(ReactApplicationContext reactContext) {
         super(reactContext);
+
+        widgetActionReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String action = intent.getAction();
+                String pkg = intent.getStringExtra(Widget.EXTRA_PACKAGE_NAME);
+
+                if (pkg == null) return;
+
+                if (Widget.ACTION_FORCE_STOP.equals(action)) {
+                    forceStopPackage(pkg, new Promise() {
+                        @Override
+                        public void resolve(@Nullable Object o) {
+
+                        }
+
+                        @Override
+                        public void reject(@NonNull String s, @Nullable String s1) {
+
+                        }
+
+                        @Override
+                        public void reject(@NonNull String s, @Nullable Throwable throwable) {
+
+                        }
+
+                        @Override
+                        public void reject(@NonNull String s, @Nullable String s1, @Nullable Throwable throwable) {
+
+                        }
+
+                        @Override
+                        public void reject(@NonNull Throwable throwable) {
+
+                        }
+
+                        @Override
+                        public void reject(@NonNull Throwable throwable, @NonNull WritableMap writableMap) {
+
+                        }
+
+                        @Override
+                        public void reject(@NonNull String s, @NonNull WritableMap writableMap) {
+
+                        }
+
+                        @Override
+                        public void reject(@NonNull String s, @Nullable Throwable throwable, @NonNull WritableMap writableMap) {
+
+                        }
+
+                        @Override
+                        public void reject(@NonNull String s, @Nullable String s1, @NonNull WritableMap writableMap) {
+
+                        }
+
+                        @Override
+                        public void reject(@Nullable String s, @Nullable String s1, @Nullable Throwable throwable, @Nullable WritableMap writableMap) {
+
+                        }
+
+                        @Override
+                        public void reject(@NonNull String s) {
+
+                        }
+                    });
+                } else if (Widget.ACTION_TOGGLE_ENABLE.equals(action)) {
+//                    togglePackageEnabled(pkg);
+                }
+
+                AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+                int[] ids = mgr.getAppWidgetIds(new ComponentName(context, Widget.class));
+                mgr.notifyAppWidgetViewDataChanged(ids, R.id.list_view);
+            }
+        };
+
+        // Đăng ký receiver
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Widget.ACTION_FORCE_STOP);
+        filter.addAction(Widget.ACTION_TOGGLE_ENABLE);
+        ContextCompat.registerReceiver(reactContext, widgetActionReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
     @Override
@@ -104,8 +199,11 @@ public class AppManager extends ReactContextBaseJavaModule {
         });
     }
 
-    @Override
-    public void onCatalystInstanceDestroy() {
-        executor.shutdown();
-    }
+//    @Override
+//    public void onCatalystInstanceDestroy() {
+//        executor.shutdown();
+//        if (widgetActionReceiver != null) {
+//            getReactApplicationContext().unregisterReceiver(widgetActionReceiver);
+//        }
+//    }
 }

@@ -1,0 +1,85 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="8dp"
+    android:id="@+id/item_row"
+    android:background="?android:attr/selectableItemBackground">
+
+    <!-- Hàng 1: Icon + Tên app -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <ImageView
+            android:id="@+id/item_icon"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginEnd="12dp"
+            android:scaleType="centerCrop"
+            android:contentDescription="App icon" />
+
+            <TextView
+                android:id="@+id/item_title"
+                android:layout_width="wrap_content"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="App Name"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+    </LinearLayout>
+
+    <!-- Hàng 2: 2 nút (dùng TextView thay Button) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginTop="6dp">
+
+        <!-- Nút Force Stop -->
+        <Button
+            android:id="@+id/btnForceStop"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Force Stop"
+            android:textSize="12sp"
+            android:textColor="#d32f2f"
+            android:textAllCaps="false"
+            android:paddingHorizontal="8dp"
+            android:gravity="center"
+            android:focusable="false"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:focusableInTouchMode="false"
+            android:clickable="false"
+            android:layout_marginEnd="8dp" />
+
+        <!--                <LinearLayout-->
+        <!--                    android:layout_width="50dp"-->
+        <!--                    android:layout_height="wrap_content" />-->
+
+        <!-- Nút Toggle -->
+        <Button
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:id="@+id/btnToggleState"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Disable"
+            android:textSize="12sp"
+            android:textColor="#1976d2"
+            android:paddingHorizontal="8dp"
+            android:gravity="center"
+            android:textAllCaps="false"
+            android:focusable="false"
+            android:focusableInTouchMode="false"
+            android:clickable="false"
+            android:layout_marginEnd="8dp" />
+
+    </LinearLayout>
+</LinearLayout>

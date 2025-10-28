@@ -8,7 +8,10 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class AppManagerUserService extends IAppManagerService.Stub {
     private static final String TAG = "SK_AppManagerUserService";
@@ -72,6 +75,67 @@ public class AppManagerUserService extends IAppManagerService.Stub {
         fallback.add(packageName);
         runCommand(fallback);
     }
+
+    private List<String> runCommandAndGetOutput(List<String> command) throws RemoteException {
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.redirectErrorStream(true);
+        List<String> output = new ArrayList<>();
+        try {
+            Process process = pb.start();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.add(line);
+            }
+            process.waitFor();
+        } catch (IOException | InterruptedException e) {
+            throw new RemoteException("runCommandAndGetOutput failed: " + e.getMessage());
+        }
+        return output;
+    }
+
+    private String extractPermissionName(String line) {
+        // Ví dụ: "    android.permission.CAMERA: granted=true"
+//        Pattern pattern = Pattern.compile("(android\\.permission\\.[A-Z_]+)");
+        Pattern pattern = Pattern.compile("([a-zA-Z0-9\\.]+\\.permission\\.[A-Z0-9_]+)");
+
+        Matcher matcher = pattern.matcher(line);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return null;
+    }
+
+
+    @Override
+    public void revokeAllPermissions(String packageName) throws RemoteException {
+        validatePackageName(packageName);
+        Log.i(TAG, "Revoking all permissions for: " + packageName);
+
+        // Lấy danh sách quyền hiện tại
+        List<String> listPerms = runCommandAndGetOutput(Arrays.asList(
+                "/system/bin/pm", "dump", packageName
+        ));
+
+        for (String line : listPerms) {
+            if (line.contains("granted=true")) {
+                String permName = extractPermissionName(line);
+                if (permName != null) {
+                    try {
+                        runCommand(Arrays.asList("/system/bin/pm", "revoke", packageName, permName));
+                        Log.i(TAG, "Revoked: " + permName);
+                    } catch (RemoteException e) {
+                        Log.w(TAG, "Failed to revoke " + permName + ": " + e.getMessage());
+                    }
+                }
+            }
+        }
+
+        // Reset AppOps để thu hồi quyền ẩn
+        runCommand(Arrays.asList("/system/bin/appops", "reset", packageName));
+    }
+
+
 
     @Override
     public void disablePackage(String packageName) throws RemoteException {
