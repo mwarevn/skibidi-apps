@@ -13,7 +13,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import { Toast } from "toastify-react-native";
+import Toast from "react-native-toast-message";
 
 const { SystemModule } = NativeModules;
 
@@ -103,6 +103,9 @@ export default function PermissionManager() {
 
     return (
         <LayoutScreen>
+            <Text style={{ fontWeight: "bold", fontSize: 18, marginLeft: 12, marginTop: 12 }}>
+                Ứng dụng trong widget
+            </Text>
             <View style={styles.container}>
                 {loading ? (
                     <Text>Đang tải...</Text>

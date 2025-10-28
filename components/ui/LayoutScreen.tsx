@@ -1,12 +1,15 @@
 import React from "react";
-import { View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function LayoutScreen({ children }: any) {
     return (
-        <View style={{ flex: 1 }}>
-            <View style={{ flex: 1 }}>{children}</View>
+        <SafeAreaView style={{ flex: 1 }}>
+            {/* <View style={{ height: 64 }}>Phần trên cố định 120px</View> */}
 
-            <View style={{ height: 64 }}>{/* Phần trên cố định 120px */}</View>
-        </View>
+            {/* <View style={{ flex: 1 }}>{children}</View> */}
+            {children}
+
+            {/* <View style={{ height: 64 }}>Phần trên cố định 120px</View> */}
+        </SafeAreaView>
     );
 }

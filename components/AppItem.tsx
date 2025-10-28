@@ -1,5 +1,6 @@
+import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useCallback, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 type Props = {
     item: any;
@@ -9,10 +10,10 @@ type Props = {
 };
 
 function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress }: Props) {
-    const isSelected = selectedApps.find((i: any) => i.packageName === item.packageName);
+    const isSelected = selectedApps.some((i: any) => i.packageName === item.packageName);
     const [isPressed, setIsPressed] = useState(false);
 
-    const handlePress = useCallback(() => {
+    const handleCheckboxPress = useCallback(() => {
         if (isSelected) {
             setSelectedApps(selectedApps.filter((i: any) => i.packageName !== item.packageName));
         } else {
@@ -30,7 +31,6 @@ function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress }: 
             onLongPress={handleLongPress}
             onPressIn={() => setIsPressed(true)}
             onPressOut={() => setIsPressed(false)}
-            onPress={handlePress}
         >
             <View style={styles.row}>
                 {item.iconBase64 ? (
@@ -38,11 +38,18 @@ function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress }: 
                 ) : (
                     <View style={[styles.icon, styles.placeholderIcon]} />
                 )}
-                <View>
+                <View style={styles.textContainer}>
                     <Text style={styles.name}>{item.appName}</Text>
                     <Text style={styles.pkg}>{item.packageName}</Text>
                     {!item.enabled && <Text style={styles.disabledTag}>disabled</Text>}
                 </View>
+                <TouchableOpacity onPress={handleCheckboxPress} style={styles.checkbox}>
+                    <Ionicons
+                        name={isSelected ? "checkbox" : "square-outline"}
+                        size={24}
+                        color={isSelected ? "#007AFF" : "#ccc"}
+                    />
+                </TouchableOpacity>
             </View>
         </Pressable>
     );
@@ -74,10 +81,10 @@ const styles = StyleSheet.create({
         backgroundColor: "#ccc",
     },
     selected: {
-        backgroundColor: "#ffefef",
+        backgroundColor: "#e3f2fd",
     },
     pressed: {
-        backgroundColor: "#eef6ff",
+        backgroundColor: "#f5f5f5",
     },
     name: {
         fontSize: 14,
@@ -89,5 +96,11 @@ const styles = StyleSheet.create({
     },
     disabledTag: {
         color: "orangered",
+    },
+    textContainer: {
+        flex: 1,
+    },
+    checkbox: {
+        padding: 5,
     },
 });

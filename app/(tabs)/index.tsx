@@ -1,10 +1,12 @@
 import AppItem from "@/components/AppItem";
 import LayoutScreen from "@/components/ui/LayoutScreen";
+import { Colors } from "@/constants/theme";
+import { useColorScheme } from "@/hooks/use-color-scheme";
 import AppManagerWrapper from "@/utils/appManager";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from "@gorhom/bottom-sheet";
 import { useNavigation } from "@react-navigation/native";
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -20,7 +22,8 @@ import {
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { NativeStackNavigationProp } from "react-native-screens/lib/typescript/native-stack/types";
-import { Toast } from "toastify-react-native";
+import Toast from "react-native-toast-message";
+
 const { SystemModule, ShizukuModule } = NativeModules;
 
 type RootStackParamList = {
@@ -30,14 +33,17 @@ type RootStackParamList = {
 
 export default function AppsScreen() {
     const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+    const theme = useColorScheme();
 
     const [selectedApps, setSelectedApps] = useState<any[]>([]);
     const [selectedApp, setSelectedApp] = useState<any | null>(null);
     const [apps, setApps] = useState<any[]>([]);
     const [loading, setLoading] = useState<boolean>(false);
-    const [search, setSearch] = useState("");
+    const [search, setSearch] = useState<string>("");
+    const [filters, setFilters] = useState({ disabled: false, system: false, inWidget: false });
+    const [widgetAppsSet, setWidgetAppsSet] = useState<Set<string>>(new Set());
     const [shizukuAvailable, setShizukuAvailable] = useState<boolean | null>(null);
-    const [shizukuHasPermission, setShizukuHasPermission] = useState<boolean | null>(null);
+    const [shizukuHasPermission, setShizukuHasPermission] = useState<boolean>(false);
 
     const SHIZUKU_PKG = "moe.shizuku.privileged.api";
 
@@ -71,7 +77,7 @@ export default function AppsScreen() {
                 Toast.show({ type: "success", text1: "Hoàn tất", text2: successMsg });
             }
 
-            await loadApps().finally(() => setSelectedApps([]));
+            await loadApps(false).finally(() => setSelectedApps([]));
         },
         []
     );
@@ -104,23 +110,68 @@ export default function AppsScreen() {
         setSelectedApp(null);
     }, []);
 
-    async function loadApps() {
+    const getWidgetAppsSet = useCallback(async () => {
         try {
-            setLoading(true);
+            const currentData = await SystemModule.getListWidgetData?.();
+            if (!currentData || currentData === "null" || currentData === "[]") {
+                return new Set();
+            }
+            const currentList = JSON.parse(currentData);
+            return new Set(currentList.map((app: any) => app.packageName));
+        } catch (e) {
+            console.warn("Failed to get widget apps:", e);
+            return new Set();
+        }
+    }, []);
+
+    const isAppInWidget = useCallback(
+        async (packageName: string) => {
+            const widgetApps = await getWidgetAppsSet();
+            return widgetApps.has(packageName);
+        },
+        [getWidgetAppsSet]
+    );
+
+    const syncWidgetData = useCallback(async (appsList: any[]) => {
+        try {
+            const currentData = await SystemModule.getListWidgetData?.();
+            if (!currentData || currentData === "null" || currentData === "[]") {
+                return;
+            }
+            const currentList = JSON.parse(currentData);
+            // Merge with latest app info
+            const mergedList = currentList.map((widgetApp: any) => {
+                const latestApp = appsList.find((app: any) => app.packageName === widgetApp.packageName);
+                return latestApp || widgetApp;
+            });
+            await SystemModule.setListWidgetData(JSON.stringify(mergedList));
+        } catch (e) {
+            console.warn("Failed to sync widget data:", e);
+        }
+    }, []);
+
+    async function loadApps(showLoading = false) {
+        try {
+            if (showLoading) setLoading(true);
             const list = await SystemModule.getAllApps();
             console.log("Total apps:", list.length);
             setApps(list);
+            // Sync widget data with updated app info
+            await syncWidgetData(list);
+            // Update widget apps set
+            const widgetSet = (await getWidgetAppsSet()) as Set<string>;
+            setWidgetAppsSet(widgetSet);
         } catch (e) {
             console.error("Error loading apps:", e);
         } finally {
-            setLoading(false);
+            if (showLoading) setLoading(false);
         }
     }
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
         try {
-            await loadApps();
+            await loadApps(true);
         } catch (e) {
             console.warn(e);
         } finally {
@@ -128,14 +179,52 @@ export default function AppsScreen() {
         }
     }, []);
 
-    // filtered list by packageName (case-insensitive)
+    // filtered list by packageName (case-insensitive) and filters
     const filteredApps = useMemo(() => {
-        if (!search || search.trim() === "") return apps;
-        const q = search.toLowerCase();
-        return apps.filter((a: any) => (a.packageName || "").toLowerCase().includes(q));
-    }, [apps, search]);
+        let filtered = apps;
+        if (search && search.trim() !== "") {
+            const q = search.toLowerCase();
+            filtered = filtered.filter((a: any) => (a.packageName || "").toLowerCase().includes(q));
+        }
+        if (filters.disabled) {
+            filtered = filtered.filter((a: any) => !a.enabled);
+        }
+        if (filters.system) {
+            filtered = filtered.filter((a: any) => a.isSystemApp);
+        }
+        if (filters.inWidget) {
+            filtered = filtered.filter((a: any) => widgetAppsSet.has(a.packageName));
+        }
+        return filtered;
+    }, [apps, search, filters, widgetAppsSet]);
 
-    const addToWidget = async (itemData) => {
+    // check if all filtered apps are selected
+    const allSelected = useMemo(() => {
+        return (
+            filteredApps.length > 0 &&
+            filteredApps.every((app) => selectedApps.some((s) => s.packageName === app.packageName))
+        );
+    }, [filteredApps, selectedApps]);
+
+    const toggleSelectAll = useCallback(() => {
+        if (allSelected) {
+            // deselect all filtered apps
+            setSelectedApps((prev) => prev.filter((s) => !filteredApps.some((f) => f.packageName === s.packageName)));
+        } else {
+            // select all filtered apps
+            setSelectedApps((prev) => {
+                const newSelected = [...prev];
+                filteredApps.forEach((app) => {
+                    if (!newSelected.some((s) => s.packageName === app.packageName)) {
+                        newSelected.push(app);
+                    }
+                });
+                return newSelected;
+            });
+        }
+    }, [allSelected, filteredApps]);
+
+    const addToWidget = async (itemData: any) => {
         try {
             // 1. Lấy danh sách hiện tại từ SharedPreferences (nếu có)
             const currentData = await SystemModule.getListWidgetData?.(); // [Tùy chọn] nếu bạn thêm method này
@@ -153,7 +242,7 @@ export default function AppsScreen() {
             const appMap = new Map();
 
             // Thêm các app hiện có
-            currentList066.forEach((app) => {
+            currentList066.forEach((app: any) => {
                 if (app.packageName) {
                     appMap.set(app.packageName, app);
                 }
@@ -189,60 +278,38 @@ export default function AppsScreen() {
         }
     };
 
-    // Set up header options based on selected apps (disable/trash)
-    useLayoutEffect(() => {
-        navigation.setOptions({
-            headerRight:
-                selectedApps.length === 0
-                    ? null
-                    : () => (
-                          <View style={{ flexDirection: "row", alignItems: "center" }}>
-                              <Text style={{ fontWeight: "bold" }}>{selectedApps.length} selected</Text>
-
-                              <TouchableOpacity
-                                  onPress={async () => {
-                                      runBatchAction(
-                                          selectedApps,
-                                          AppManagerWrapper.disablePackage,
-                                          "Đã vô hiệu hoá tất cả package đã chọn.",
-                                          "không thể vô hiệu hoá."
-                                      );
-                                  }}
-                                  style={{
-                                      marginHorizontal: 8,
-                                      padding: 10,
-                                      borderRadius: 1000,
-                                      backgroundColor: "#dbdbdb50",
-                                  }}
-                              >
-                                  <Ionicons name={"ban-outline"} color="grey" size={25} />
-                              </TouchableOpacity>
-
-                              <TouchableOpacity
-                                  onPress={() =>
-                                      runBatchAction(
-                                          selectedApps,
-                                          AppManagerWrapper.uninstallPackage,
-                                          "Đã gỡ cài đặt tất cả package đã chọn.",
-                                          "không thể gỡ cài đặt."
-                                      )
-                                  }
-                                  style={{
-                                      marginRight: 8,
-                                      padding: 10,
-                                      borderRadius: 1000,
-                                      backgroundColor: "#dbdbdb50",
-                                  }}
-                              >
-                                  <Ionicons name={"trash"} color="red" size={25} />
-                              </TouchableOpacity>
-                          </View>
-                      ),
-        } as any);
-    }, [selectedApps, navigation, runBatchAction]);
+    const removeFromWidget = async (packageName: string) => {
+        try {
+            const currentData = await SystemModule.getListWidgetData?.();
+            if (!currentData || currentData === "null" || currentData === "[]") {
+                return;
+            }
+            const currentList = JSON.parse(currentData);
+            const filteredList = currentList.filter((app: any) => app.packageName !== packageName);
+            await SystemModule.setListWidgetData(JSON.stringify(filteredList));
+            Toast.show({
+                type: "success",
+                text1: "Hoàn tất",
+                text2: "Đã xóa khỏi widget",
+            });
+            // Update widgetAppsSet
+            setWidgetAppsSet((prev) => {
+                const newSet = new Set(prev);
+                newSet.delete(packageName);
+                return newSet;
+            });
+        } catch (err) {
+            console.error("Lỗi xóa widget:", err);
+            Toast.show({
+                type: "error",
+                text1: "Lỗi",
+                text2: "Không thể xóa khỏi widget",
+            });
+        }
+    };
 
     React.useEffect(() => {
-        loadApps();
+        loadApps(true);
     }, []);
 
     // consolidated Shizuku check: runs when apps load and when screen focuses
@@ -329,37 +396,90 @@ export default function AppsScreen() {
         };
     }, [checkShizuku]);
 
+    const [modalVisible, setModalVisible] = useState(false);
+
     return (
-        <LayoutScreen>
-            <GestureHandlerRootView style={styles.container}>
-                <View style={{ backgroundColor: "#fff" }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", marginLeft: 10 }}>
-                        <Text>Total: {apps.length} apps</Text>
-                        <Text
+        <GestureHandlerRootView style={styles.container}>
+            <LayoutScreen>
+                <Text
+                    style={{
+                        marginTop: 20,
+                        color: shizukuAvailable ? (shizukuHasPermission ? "#2e7d32" : "#f9a825") : "#d32f2f",
+                        fontWeight: "bold",
+                        fontSize: 18,
+                        marginStart: 18,
+                    }}
+                >
+                    {shizukuAvailable === null
+                        ? "Checking Shizuku..."
+                        : shizukuAvailable
+                        ? shizukuHasPermission
+                            ? "Shizuku Authorized"
+                            : "Shizuku Needs Permission"
+                        : "Shizuku Not Installed"}
+                </Text>
+                <Text style={{ marginStart: 20, fontWeight: "bold", fontSize: 12, opacity: 0.2 }}>mwarevn</Text>
+
+                <View>
+                    <View
+                        style={{
+                            width: "100%",
+                            marginHorizontal: "auto",
+                            marginTop: 28,
+                            position: "relative",
+                        }}
+                    >
+                        <TextInput
+                            value={search}
+                            onChangeText={setSearch}
+                            placeholder="Search by package name..."
+                            style={[styles.search, { paddingRight: 44 }]}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                            returnKeyType="search"
+                        />
+                        <TouchableOpacity
                             style={{
-                                marginLeft: 12,
-                                color: shizukuAvailable ? (shizukuHasPermission ? "#2e7d32" : "#f9a825") : "#d32f2f",
+                                position: "absolute",
+                                right: 28,
+                                top: 0,
+                                bottom: 0,
+                                justifyContent: "center",
+                                alignItems: "center",
+                                padding: 8,
                             }}
                         >
-                            {shizukuAvailable === null
-                                ? "Checking Shizuku..."
-                                : shizukuAvailable
-                                ? shizukuHasPermission
-                                    ? "Shizuku: Authorized"
-                                    : "Shizuku: Needs Permission"
-                                : "Shizuku: Not Installed"}
-                        </Text>
+                            <Ionicons name="search" size={20} color="#939393a5" />
+                        </TouchableOpacity>
                     </View>
 
-                    <TextInput
-                        value={search}
-                        onChangeText={setSearch}
-                        placeholder="Search by package name..."
-                        style={styles.search}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        clearButtonMode="while-editing"
-                    />
+                    <Text style={{ marginTop: 8, marginStart: 18, fontSize: 11 }}>
+                        * {filteredApps.length}/{apps.length}
+                    </Text>
+                </View>
+
+                <View style={styles.filtersContainer}>
+                    <TouchableOpacity
+                        onPress={() => setFilters((prev) => ({ ...prev, disabled: !prev.disabled }))}
+                        style={[styles.filterButton, filters.disabled && styles.filterButtonActive]}
+                    >
+                        <Ionicons name="ban" size={16} color={filters.disabled ? "#fff" : "#666"} />
+                        <Text style={[styles.filterText, filters.disabled && styles.filterTextActive]}>Disabled</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={() => setFilters((prev) => ({ ...prev, system: !prev.system }))}
+                        style={[styles.filterButton, filters.system && styles.filterButtonActive]}
+                    >
+                        <Ionicons name="settings" size={16} color={filters.system ? "#fff" : "#666"} />
+                        <Text style={[styles.filterText, filters.system && styles.filterTextActive]}>System</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={() => setFilters((prev) => ({ ...prev, inWidget: !prev.inWidget }))}
+                        style={[styles.filterButton, filters.inWidget && styles.filterButtonActive]}
+                    >
+                        <Ionicons name="star" size={16} color={filters.inWidget ? "#fff" : "#666"} />
+                        <Text style={[styles.filterText, filters.inWidget && styles.filterTextActive]}>In Widget</Text>
+                    </TouchableOpacity>
                 </View>
 
                 {loading ? (
@@ -372,32 +492,34 @@ export default function AppsScreen() {
                 ) : filteredApps.length === 0 ? (
                     <Text>No results for {`"${search}"`}</Text>
                 ) : (
-                    <FlatList
-                        ref={(r) => {
-                            listRef.current = r;
-                        }}
-                        data={filteredApps}
-                        refreshing={refreshing}
-                        onRefresh={onRefresh}
-                        onScroll={({ nativeEvent }) => {
-                            const offsetY = nativeEvent.contentOffset?.y || 0;
-                            setShowScrollTop(offsetY > 200);
-                        }}
-                        scrollEventThrottle={16}
-                        renderItem={({ item }) => (
-                            <AppItem
-                                item={item}
-                                setSelectedApps={setSelectedApps}
-                                selectedApps={selectedApps}
-                                onLongPress={handleOpenSheetForApp}
-                            />
-                        )}
-                        keyExtractor={(item) => item.packageName}
-                        initialNumToRender={20}
-                        windowSize={11}
-                        removeClippedSubviews={true}
-                        maxToRenderPerBatch={20}
-                    />
+                    <View style={{ flex: 1, paddingBottom: selectedApps.length > 0 ? 120 : 0 }}>
+                        <FlatList
+                            ref={(r) => {
+                                listRef.current = r;
+                            }}
+                            data={filteredApps}
+                            refreshing={refreshing}
+                            onRefresh={onRefresh}
+                            onScroll={({ nativeEvent }) => {
+                                const offsetY = nativeEvent.contentOffset?.y || 0;
+                                setShowScrollTop(offsetY > 200);
+                            }}
+                            scrollEventThrottle={16}
+                            renderItem={({ item }) => (
+                                <AppItem
+                                    item={item}
+                                    setSelectedApps={setSelectedApps}
+                                    selectedApps={selectedApps}
+                                    onLongPress={handleOpenSheetForApp}
+                                />
+                            )}
+                            keyExtractor={(item) => item.packageName}
+                            initialNumToRender={20}
+                            windowSize={11}
+                            removeClippedSubviews={true}
+                            maxToRenderPerBatch={20}
+                        />
+                    </View>
                 )}
 
                 {showScrollTop ? (
@@ -432,10 +554,60 @@ export default function AppsScreen() {
                             elevation: 1,
                         }}
                     >
-                        {/* <Text style={{ color: "#fff", fontWeight: "bold" }}>↑</Text> */}
                         <Ionicons name={"arrow-up"} color="#000" size={20} />
                     </TouchableOpacity>
                 ) : null}
+
+                {selectedApps.length > 0 && (
+                    <View style={[styles.selectionActions, { backgroundColor: Colors[theme ?? "light"].background }]}>
+                        <Text style={[styles.selectionText, { color: Colors[theme ?? "light"].text }]}>
+                            {selectedApps.length} selected
+                        </Text>
+                        <View style={styles.actionButtons}>
+                            <TouchableOpacity
+                                onPress={toggleSelectAll}
+                                style={[styles.actionButton, { backgroundColor: Colors[theme ?? "light"].background }]}
+                            >
+                                <Ionicons
+                                    name={allSelected ? "checkbox" : "square-outline"}
+                                    size={20}
+                                    color={allSelected ? Colors[theme ?? "light"].tint : Colors[theme ?? "light"].icon}
+                                />
+                                <Text style={[styles.actionButtonText, { color: Colors[theme ?? "light"].text }]}>
+                                    {allSelected ? "Deselect All" : "Select All"}
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={async () => {
+                                    runBatchAction(
+                                        selectedApps,
+                                        AppManagerWrapper.disablePackage,
+                                        "Đã vô hiệu hoá tất cả package đã chọn.",
+                                        "không thể vô hiệu hoá."
+                                    );
+                                }}
+                                style={[styles.actionButton, { backgroundColor: Colors[theme ?? "light"].background }]}
+                            >
+                                <Ionicons name="ban-outline" size={20} color="grey" />
+                                <Text style={styles.actionButtonText}>Disable</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={() =>
+                                    runBatchAction(
+                                        selectedApps,
+                                        AppManagerWrapper.uninstallPackage,
+                                        "Đã gỡ cài đặt tất cả package đã chọn.",
+                                        "không thể gỡ cài đặt."
+                                    )
+                                }
+                                style={[styles.actionButton, { backgroundColor: "#ffebee" }]}
+                            >
+                                <Ionicons name="trash" size={20} color="red" />
+                                <Text style={[styles.actionButtonText, { color: "red" }]}>Delete</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                )}
 
                 <BottomSheet
                     index={-1}
@@ -498,7 +670,7 @@ export default function AppsScreen() {
                                                     text2: "Không thể vô hiệu hoá",
                                                 });
                                             } finally {
-                                                await loadApps();
+                                                await loadApps(false);
                                                 closeSheet();
                                             }
                                         }}
@@ -531,7 +703,7 @@ export default function AppsScreen() {
                                                 console.error(err);
                                                 Toast.show({ type: "error", text1: "Lỗi", text2: "Không thể bật" });
                                             } finally {
-                                                await loadApps();
+                                                await loadApps(false);
                                                 closeSheet();
                                             }
                                         }}
@@ -557,7 +729,7 @@ export default function AppsScreen() {
                                             console.error(err);
                                             Toast.show({ type: "error", text1: "Lỗi", text2: "Không thể dừng" });
                                         } finally {
-                                            await loadApps();
+                                            await loadApps(false);
                                             closeSheet();
                                         }
                                     }}
@@ -569,11 +741,24 @@ export default function AppsScreen() {
 
                                 <TouchableOpacity
                                     onPress={async () => {
-                                        await addToWidget(selectedApp);
+                                        const pkg = selectedApp?.packageName;
+                                        if (!pkg) return;
+                                        const inWidget = widgetAppsSet.has(pkg);
+                                        if (inWidget) {
+                                            await removeFromWidget(pkg);
+                                        } else {
+                                            await addToWidget(selectedApp);
+                                        }
+                                        await loadApps(false);
+                                        closeSheet();
                                     }}
                                     style={{ padding: 12, backgroundColor: "#f0f0f0", borderRadius: 8 }}
                                 >
-                                    <Text style={{ textAlign: "center" }}>Add to Widget</Text>
+                                    <Text style={{ textAlign: "center" }}>
+                                        {selectedApp && widgetAppsSet.has(selectedApp.packageName)
+                                            ? "Remove from Widget"
+                                            : "Add to Widget"}
+                                    </Text>
                                 </TouchableOpacity>
 
                                 <View style={{ height: 12 }} />
@@ -592,7 +777,7 @@ export default function AppsScreen() {
                                             console.error(err);
                                             Toast.show({ type: "error", text1: "Lỗi", text2: "Không thể gỡ cài đặt" });
                                         } finally {
-                                            await loadApps();
+                                            await loadApps(false);
                                             closeSheet();
                                         }
                                     }}
@@ -600,14 +785,15 @@ export default function AppsScreen() {
                                 >
                                     <Text style={{ textAlign: "center", color: "#900" }}>Uninstall</Text>
                                 </TouchableOpacity>
+                                <View style={{ height: 12 }} />
                             </View>
                         ) : (
                             <Text>Không có app được chọn</Text>
                         )}
                     </BottomSheetView>
                 </BottomSheet>
-            </GestureHandlerRootView>
-        </LayoutScreen>
+            </LayoutScreen>
+        </GestureHandlerRootView>
     );
 }
 
@@ -618,7 +804,6 @@ const styles = StyleSheet.create({
     },
     contentContainer: {
         flex: 1,
-        paddingBottom: 64,
         alignItems: "center",
     },
     search: {
@@ -626,8 +811,97 @@ const styles = StyleSheet.create({
         borderRadius: 8,
         borderWidth: 0.3,
         borderColor: "#ddd",
-        paddingHorizontal: 10,
-        marginVertical: 8,
-        marginHorizontal: 8,
+        paddingHorizontal: 12,
+        backgroundColor: "#e9e9e9ff",
+        marginHorizontal: "auto",
+        width: "85%",
+    },
+    selectAllContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+        marginTop: 12,
+        marginStart: 18,
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        backgroundColor: "#f5f5f5",
+        borderRadius: 8,
+        alignSelf: "flex-start",
+    },
+    selectAllText: {
+        marginLeft: 8,
+        fontSize: 14,
+        fontWeight: "600",
+        color: "#333",
+    },
+    selectionActions: {
+        position: "absolute",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: "#fff",
+        padding: 16,
+        borderTopWidth: 1,
+        borderTopColor: "#eee",
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 5,
+    },
+    selectionText: {
+        fontSize: 16,
+        fontWeight: "bold",
+        marginBottom: 12,
+        textAlign: "center",
+    },
+    actionButtons: {
+        flexDirection: "row",
+        justifyContent: "space-around",
+    },
+    actionButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#f0f0f0",
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        minWidth: 100,
+        justifyContent: "center",
+    },
+    actionButtonText: {
+        marginLeft: 8,
+        fontSize: 14,
+        fontWeight: "600",
+    },
+    filtersContainer: {
+        flexDirection: "row",
+        justifyContent: "space-around",
+        marginTop: 8,
+        marginHorizontal: 18,
+        gap: 8,
+        marginBottom: 4,
+    },
+    filterButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: 8,
+        backgroundColor: "#f0f0f0",
+        borderWidth: 1,
+        borderColor: "#ddd",
+    },
+    filterButtonActive: {
+        backgroundColor: "#007AFF",
+        borderColor: "#007AFF",
+    },
+    filterText: {
+        marginLeft: 6,
+        fontSize: 12,
+        color: "#666",
+        fontWeight: "500",
+    },
+    filterTextActive: {
+        color: "#fff",
     },
 });

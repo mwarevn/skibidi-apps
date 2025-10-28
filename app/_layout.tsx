@@ -3,7 +3,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from "@react-navigation/native
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
-import ToastManager from "toastify-react-native";
+import Toast from "react-native-toast-message";
 
 export const unstable_settings = {
     anchor: "(tabs)",
@@ -11,13 +11,6 @@ export const unstable_settings = {
 
 export default function RootLayout() {
     const colorScheme = useColorScheme();
-    const toastConfig = {
-        // custom: (props: any) => <CustomToast {...props} />,
-        // success: (props: any) => <CustomToast {...props} />,
-        // error: (props: any) => <CustomToast {...props} />,
-        // info: (props: any) => <CustomToast {...props} />,
-        // warning: (props: any) => <CustomToast {...props} />,
-    };
 
     return (
         <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
@@ -25,7 +18,7 @@ export default function RootLayout() {
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                 <Stack.Screen name="modal" options={{ presentation: "modal", title: "Modal" }} />
             </Stack>
-            <ToastManager config={toastConfig} />
+            <Toast />
             <StatusBar style="auto" />
         </ThemeProvider>
     );
