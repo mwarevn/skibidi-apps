@@ -135,6 +135,60 @@ export default function AppsScreen() {
         return apps.filter((a: any) => (a.packageName || "").toLowerCase().includes(q));
     }, [apps, search]);
 
+    const addToWidget = async (itemData) => {
+        try {
+            // 1. Lấy danh sách hiện tại từ SharedPreferences (nếu có)
+            const currentData = await SystemModule.getListWidgetData?.(); // [Tùy chọn] nếu bạn thêm method này
+            let currentList066 = [];
+
+            if (currentData && currentData !== "null" && currentData !== "[]") {
+                try {
+                    currentList066 = JSON.parse(currentData);
+                } catch (e) {
+                    currentList066 = [];
+                }
+            }
+
+            // 2. Tạo map để loại trùng dựa trên packageName
+            const appMap = new Map();
+
+            // Thêm các app hiện có
+            currentList066.forEach((app) => {
+                if (app.packageName) {
+                    appMap.set(app.packageName, app);
+                }
+            });
+
+            // Thêm các app mới được chọn
+            [itemData].forEach((app) => {
+                if (app.packageName) {
+                    appMap.set(app.packageName, app);
+                }
+            });
+
+            // 3. Chuyển về array
+            const mergedList = Array.from(appMap.values());
+
+            // 4. Lưu lại
+            const res = await SystemModule.setListWidgetData(JSON.stringify(mergedList));
+
+            if (res) {
+                Toast.show({
+                    type: "success",
+                    text1: "Hoàn tất",
+                    text2: `Đã thêm ${[itemData].length} app vào widget (không trùng).`,
+                });
+            }
+        } catch (err) {
+            console.error("Lỗi thêm widget:", err);
+            Toast.show({
+                type: "error",
+                text1: "Lỗi",
+                text2: "Không thể thêm vào widget",
+            });
+        }
+    };
+
     // Set up header options based on selected apps (disable/trash)
     useLayoutEffect(() => {
         navigation.setOptions({
@@ -146,14 +200,14 @@ export default function AppsScreen() {
                               <Text style={{ fontWeight: "bold" }}>{selectedApps.length} selected</Text>
 
                               <TouchableOpacity
-                                  onPress={() =>
+                                  onPress={async () => {
                                       runBatchAction(
                                           selectedApps,
                                           AppManagerWrapper.disablePackage,
                                           "Đã vô hiệu hoá tất cả package đã chọn.",
                                           "không thể vô hiệu hoá."
-                                      )
-                                  }
+                                      );
+                                  }}
                                   style={{
                                       marginHorizontal: 8,
                                       padding: 10,
@@ -278,7 +332,7 @@ export default function AppsScreen() {
     return (
         <LayoutScreen>
             <GestureHandlerRootView style={styles.container}>
-                <View style={{ backgroundColor: "#fff", display: "none" }}>
+                <View style={{ backgroundColor: "#fff" }}>
                     <View style={{ flexDirection: "row", alignItems: "center", marginLeft: 10 }}>
                         <Text>Total: {apps.length} apps</Text>
                         <Text
@@ -510,6 +564,16 @@ export default function AppsScreen() {
                                     style={{ padding: 12, backgroundColor: "#ffecb3", borderRadius: 8 }}
                                 >
                                     <Text style={{ textAlign: "center" }}>Force Stop</Text>
+                                </TouchableOpacity>
+                                <View style={{ height: 12 }} />
+
+                                <TouchableOpacity
+                                    onPress={async () => {
+                                        await addToWidget(selectedApp);
+                                    }}
+                                    style={{ padding: 12, backgroundColor: "#f0f0f0", borderRadius: 8 }}
+                                >
+                                    <Text style={{ textAlign: "center" }}>Add to Widget</Text>
                                 </TouchableOpacity>
 
                                 <View style={{ height: 12 }} />
