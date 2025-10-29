@@ -1,8 +1,5 @@
 package com.mwarevn.skibiops.widget;
 
-import static com.facebook.soloader.SoLoader.TAG;
-
-import android.app.PendingIntent;
 import android.appwidget.AppWidgetManager;
 import android.content.Context;
 import android.content.Intent;
@@ -10,7 +7,6 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
-import android.net.Uri;
 import android.util.Base64;
 import android.util.Log;
 import android.widget.RemoteViews;
@@ -27,12 +23,10 @@ import java.util.List;
 public class WGRemoteViewsFactory implements RemoteViewsService.RemoteViewsFactory{
 
     private Context context;
-    private int appWidgetId;
     private List<String> items = new ArrayList<>();
 
     public WGRemoteViewsFactory(Context applicationContext, Intent intent) {
         this.context = applicationContext;
-        this.appWidgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID);
     }
 
     @Override
@@ -47,9 +41,7 @@ public class WGRemoteViewsFactory implements RemoteViewsService.RemoteViewsFacto
 
     @Override
     public RemoteViews getLoadingView() {
-        // Trả RemoteViews đơn giản thay vì null
-        RemoteViews loading = new RemoteViews(context.getPackageName(), com.facebook.react.R.layout.dev_loading_view);
-        return loading;
+        return new RemoteViews(context.getPackageName(), com.facebook.react.R.layout.dev_loading_view);
     }
 
     private String getCurrentJsonData() {

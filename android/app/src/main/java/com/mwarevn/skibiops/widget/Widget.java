@@ -162,10 +162,14 @@ public class Widget extends AppWidgetProvider {
     @Override
     public void onEnabled(Context context) {
         // Enter relevant functionality for when the first widget is created
+        Intent intent = new Intent(context, WidgetUpdateService.class);
+        context.startService(intent);
     }
 
     @Override
     public void onDisabled(Context context) {
         super.onDisabled(context);
+        Intent intent = new Intent(context, WidgetUpdateService.class);
+        context.stopService(intent);
     }
 }

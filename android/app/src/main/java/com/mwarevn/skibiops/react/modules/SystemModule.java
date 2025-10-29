@@ -67,8 +67,6 @@ public class SystemModule extends ReactContextBaseJavaModule {
         editor.putString("list_items", jsonData); // jsonData là JSONArray string, ví dụ: [{"title":"Item1"}]
         editor.apply();
 
-//        updateWidgetAfterDataChange();
-
         new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
             updateWidgetAfterDataChange();
             promise.resolve(true);

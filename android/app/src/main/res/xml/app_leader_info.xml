@@ -6,9 +6,9 @@
     android:minWidth="100dp"
     android:minHeight="46dp"
     android:previewImage="@drawable/demo_widget"
-    android:previewLayout="@layout/app_leader"
+    android:previewLayout="@layout/widget_preview"
     android:resizeMode="horizontal|vertical"
-    android:targetCellWidth="1"
+    android:targetCellWidth="2"
     android:targetCellHeight="1"
     android:updatePeriodMillis="0"
     android:widgetCategory="home_screen" />
