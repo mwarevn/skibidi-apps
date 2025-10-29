@@ -1,13 +1,13 @@
-package com.mwarevn.skibiops.react.packages;
+package com.mwarevn.appremover.react.packages;
 
 import com.facebook.react.ReactPackage;
 import com.facebook.react.bridge.NativeModule;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.uimanager.ViewManager;
-import com.mwarevn.skibiops.react.modules.ShizukuModule;
-import com.mwarevn.skibiops.react.modules.AppManager;
-import com.mwarevn.skibiops.react.modules.AppManagerBinder;
-import com.mwarevn.skibiops.react.modules.SystemModule;
+import com.mwarevn.appremover.react.modules.ShizukuModule;
+import com.mwarevn.appremover.react.modules.AppManager;
+import com.mwarevn.appremover.react.modules.AppManagerBinder;
+import com.mwarevn.appremover.react.modules.SystemModule;
 
 import java.util.ArrayList;
 import java.util.Collections;

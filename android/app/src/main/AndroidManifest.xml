@@ -93,8 +93,8 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
 
-                <data android:scheme="skibiops" />
-                <data android:scheme="exp+skibi-ops" />
+                <data android:scheme="trash-app-remover" />
+                <data android:scheme="exp+trash-app-remover" />
             </intent-filter>
         </activity>
     </application>

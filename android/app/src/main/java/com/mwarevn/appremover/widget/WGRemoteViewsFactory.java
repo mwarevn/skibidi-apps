@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops.widget;
+package com.mwarevn.appremover.widget;
 
 import android.appwidget.AppWidgetManager;
 import android.content.Context;
@@ -12,7 +12,7 @@ import android.util.Log;
 import android.widget.RemoteViews;
 import android.widget.RemoteViewsService;
 
-import com.mwarevn.skibiops.R;
+import com.mwarevn.appremover.R;
 
 import org.json.JSONArray;
 import org.json.JSONObject;

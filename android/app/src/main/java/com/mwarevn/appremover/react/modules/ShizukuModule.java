@@ -1,7 +1,6 @@
-package com.mwarevn.skibiops.react.modules;
+package com.mwarevn.appremover.react.modules;
 
 import android.app.Activity;
-import android.content.pm.PackageManager;
 
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;

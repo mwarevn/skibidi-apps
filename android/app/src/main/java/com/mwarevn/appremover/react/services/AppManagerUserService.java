@@ -1,7 +1,7 @@
-package com.mwarevn.skibiops.react.services;
+package com.mwarevn.appremover.react.services;
 
 import android.os.RemoteException;
-import com.mwarevn.skibiops.IAppManagerService;
+import com.mwarevn.appremover.IAppManagerService;
 
 import android.util.Log;
 import java.io.BufferedReader;

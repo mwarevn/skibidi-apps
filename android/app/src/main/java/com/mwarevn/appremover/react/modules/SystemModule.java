@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops.react.modules;
+package com.mwarevn.appremover.react.modules;
 
 import android.annotation.SuppressLint;
 import android.appwidget.AppWidgetManager;
@@ -22,8 +22,8 @@ import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
-import com.mwarevn.skibiops.R;
-import com.mwarevn.skibiops.widget.Widget;
+import com.mwarevn.appremover.R;
+import com.mwarevn.appremover.widget.Widget;
 
 import java.io.ByteArrayOutputStream;
 import java.util.List;

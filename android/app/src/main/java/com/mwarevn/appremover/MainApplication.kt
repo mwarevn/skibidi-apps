@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops;
+package com.mwarevn.appremover;
 
 import android.app.Application;
 import android.content.res.Configuration;
@@ -16,7 +16,7 @@ import com.facebook.react.defaults.DefaultReactNativeHost;
 
 import expo.modules.ApplicationLifecycleDispatcher;
 import expo.modules.ReactNativeHostWrapper;
-import com.mwarevn.skibiops.react.packages.SystemPackage;
+import com.mwarevn.appremover.react.packages.SystemPackage;
 
 import rikka.shizuku.Shizuku;
 

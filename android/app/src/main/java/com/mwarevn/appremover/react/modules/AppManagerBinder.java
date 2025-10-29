@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops.react.modules;
+package com.mwarevn.appremover.react.modules;
 
 import android.content.ComponentName;
 import android.content.ServiceConnection;
@@ -10,8 +10,8 @@ import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.Promise;
-import com.mwarevn.skibiops.IAppManagerService;
-import com.mwarevn.skibiops.react.services.AppManagerUserService;
+import com.mwarevn.appremover.IAppManagerService;
+import com.mwarevn.appremover.react.services.AppManagerUserService;
 
 import rikka.shizuku.Shizuku;
 
@@ -64,7 +64,7 @@ public class AppManagerBinder extends ReactContextBaseJavaModule {
             };
 
             // Ensure we provide a non-null process name suffix (Shizuku requires it)
-            String suffix = "skibiops";
+            String suffix = "mwarevn_app_remover";
             try {
                 Shizuku.UserServiceArgs args = new Shizuku.UserServiceArgs(cpn)
                         .daemon(false)

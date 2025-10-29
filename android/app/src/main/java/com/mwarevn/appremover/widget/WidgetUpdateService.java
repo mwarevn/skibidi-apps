@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops.widget;
+package com.mwarevn.appremover.widget;
 
 import android.app.AlarmManager;
 import android.app.PendingIntent;
@@ -10,7 +10,7 @@ import android.content.Intent;
 import android.os.IBinder;
 import android.os.SystemClock;
 
-import com.mwarevn.skibiops.R;
+import com.mwarevn.appremover.R;
 
 public class WidgetUpdateService extends Service {
 

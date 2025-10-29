@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops.widget;
+package com.mwarevn.appremover.widget;
 
 import android.content.ComponentName;
 import android.content.Context;
@@ -6,9 +6,9 @@ import android.content.ServiceConnection;
 import android.os.IBinder;
 import android.util.Log;
 
-import com.mwarevn.skibiops.IAppManagerService;
-import com.mwarevn.skibiops.react.modules.ServiceHolder;
-import com.mwarevn.skibiops.react.services.AppManagerUserService;
+import com.mwarevn.appremover.IAppManagerService;
+import com.mwarevn.appremover.react.modules.ServiceHolder;
+import com.mwarevn.appremover.react.services.AppManagerUserService;
 
 import rikka.shizuku.Shizuku;
 
