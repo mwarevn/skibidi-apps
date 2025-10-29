@@ -1,11 +1,11 @@
 {
     "expo": {
-        "name": "skibi-ops",
-        "slug": "skibi-ops",
+        "name": "Trash App Remover",
+        "slug": "trash-app-remover",
         "version": "1.0.0",
         "orientation": "portrait",
         "icon": "./assets/images/icon.png",
-        "scheme": "skibi-ops",
+        "scheme": "trash-app-remover",
         "userInterfaceStyle": "automatic",
         "newArchEnabled": true,
         "android": {
@@ -17,7 +17,7 @@
             },
             "edgeToEdgeEnabled": true,
             "predictiveBackGestureEnabled": false,
-            "package": "com.mwarevn.skibiops"
+            "package": "com.mwarevn.appremover"
         },
         "plugins": ["expo-router"],
         "experiments": {
