@@ -34,7 +34,11 @@ function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress }: 
         >
             <View style={styles.row}>
                 {item.iconBase64 ? (
-                    <Image source={{ uri: `data:image/png;base64,${item.iconBase64}` }} style={styles.icon} />
+                    <Image
+                        source={{ uri: `data:image/png;base64,${item.iconBase64}` }}
+                        style={styles.icon}
+                        resizeMode="cover"
+                    />
                 ) : (
                     <View style={[styles.icon, styles.placeholderIcon]} />
                 )}

@@ -3,9 +3,9 @@ import LayoutScreen from "@/components/ui/LayoutScreen";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import AppManagerWrapper from "@/utils/appManager";
+import { openPlayStore } from "@/utils/common";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from "@gorhom/bottom-sheet";
-import { useNavigation } from "@react-navigation/native";
+import BottomSheet, { BottomSheetBackdrop, BottomSheetBackdropProps, BottomSheetView } from "@gorhom/bottom-sheet";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
@@ -21,18 +21,11 @@ import {
     View,
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { NativeStackNavigationProp } from "react-native-screens/lib/typescript/native-stack/types";
 import Toast from "react-native-toast-message";
 
 const { SystemModule, ShizukuModule } = NativeModules;
 
-type RootStackParamList = {
-    MyScreen: undefined;
-    OtherScreen: { id: string };
-};
-
 export default function AppsScreen() {
-    const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const theme = useColorScheme();
 
     const [selectedApps, setSelectedApps] = useState<any[]>([]);
@@ -44,19 +37,6 @@ export default function AppsScreen() {
     const [widgetAppsSet, setWidgetAppsSet] = useState<Set<string>>(new Set());
     const [shizukuAvailable, setShizukuAvailable] = useState<boolean | null>(null);
     const [shizukuHasPermission, setShizukuHasPermission] = useState<boolean>(false);
-
-    const SHIZUKU_PKG = "moe.shizuku.privileged.api";
-
-    const openPlayStore = useCallback((pkg = SHIZUKU_PKG) => {
-        try {
-            const { Linking } = require("react-native");
-            const playUrl = `market://details?id=${pkg}`;
-            const webUrl = `https://play.google.com/store/apps/details?id=${pkg}`;
-            Linking.openURL(playUrl).catch(() => Linking.openURL(webUrl));
-        } catch (err) {
-            console.warn("Failed to open Play Store", err);
-        }
-    }, []);
 
     const runBatchAction = useCallback(
         async (items: any[], action: (pkg: string) => Promise<any>, successMsg: string, failMsg: string) => {
@@ -91,7 +71,6 @@ export default function AppsScreen() {
     // callbacks
     const handleSheetChanges = useCallback(
         (index: number) => {
-            // when sheet is closed (index === -1) clear selected app to release references
             if (index === -1) {
                 setSelectedApp(null);
             }
@@ -101,7 +80,6 @@ export default function AppsScreen() {
 
     const handleOpenSheetForApp = useCallback((app: any) => {
         setSelectedApp(app);
-        // open bottom sheet
         bottomSheetRef.current?.expand();
     }, []);
 
@@ -123,14 +101,6 @@ export default function AppsScreen() {
             return new Set();
         }
     }, []);
-
-    const isAppInWidget = useCallback(
-        async (packageName: string) => {
-            const widgetApps = await getWidgetAppsSet();
-            return widgetApps.has(packageName);
-        },
-        [getWidgetAppsSet]
-    );
 
     const syncWidgetData = useCallback(async (appsList: any[]) => {
         try {
@@ -154,7 +124,6 @@ export default function AppsScreen() {
         try {
             if (showLoading) setLoading(true);
             const list = await SystemModule.getAllApps();
-            console.log("Total apps:", list.length);
             setApps(list);
             // Sync widget data with updated app info
             await syncWidgetData(list);
@@ -223,6 +192,18 @@ export default function AppsScreen() {
             });
         }
     }, [allSelected, filteredApps]);
+
+    const renderItem = useCallback(
+        ({ item }: { item: any }) => (
+            <AppItem
+                item={item}
+                setSelectedApps={setSelectedApps}
+                selectedApps={selectedApps}
+                onLongPress={handleOpenSheetForApp}
+            />
+        ),
+        [selectedApps, setSelectedApps, handleOpenSheetForApp]
+    );
 
     const addToWidget = async (itemData: any) => {
         try {
@@ -324,7 +305,7 @@ export default function AppsScreen() {
                     if (showPrompts) {
                         Alert.alert(
                             "Yêu cầu Shizuku",
-                            "Ứng dụng này yêu cầu app 'Shizuku' để hoạt động. Vui lòng cài đặt Shizuku từ Play Store.",
+                            "Ứng dụng này yêu cầu app 'Shizuku' để hoạt động. Vui lòng cài đặt Shizuku từ Play Store. Hoặc bật dịch vụ Shizuku nếu bạn đã cài đặt.",
                             [
                                 { text: "Cài đặt", onPress: () => openPlayStore() },
                                 { text: "Bỏ qua", style: "cancel" },
@@ -396,8 +377,6 @@ export default function AppsScreen() {
         };
     }, [checkShizuku]);
 
-    const [modalVisible, setModalVisible] = useState(false);
-
     return (
         <GestureHandlerRootView style={styles.container}>
             <LayoutScreen>
@@ -453,7 +432,7 @@ export default function AppsScreen() {
                         </TouchableOpacity>
                     </View>
 
-                    <Text style={{ marginTop: 8, marginStart: 18, fontSize: 11 }}>
+                    <Text style={{ marginTop: 8, marginStart: 32, fontSize: 11 }}>
                         * {filteredApps.length}/{apps.length}
                     </Text>
                 </View>
@@ -492,7 +471,7 @@ export default function AppsScreen() {
                 ) : filteredApps.length === 0 ? (
                     <Text>No results for {`"${search}"`}</Text>
                 ) : (
-                    <View style={{ flex: 1, paddingBottom: selectedApps.length > 0 ? 120 : 0 }}>
+                    <View style={{ flex: 1, paddingBottom: selectedApps.length > 0 ? 120 : 0, paddingHorizontal: 16 }}>
                         <FlatList
                             ref={(r) => {
                                 listRef.current = r;
@@ -505,15 +484,13 @@ export default function AppsScreen() {
                                 setShowScrollTop(offsetY > 200);
                             }}
                             scrollEventThrottle={16}
-                            renderItem={({ item }) => (
-                                <AppItem
-                                    item={item}
-                                    setSelectedApps={setSelectedApps}
-                                    selectedApps={selectedApps}
-                                    onLongPress={handleOpenSheetForApp}
-                                />
-                            )}
+                            renderItem={renderItem}
                             keyExtractor={(item) => item.packageName}
+                            getItemLayout={(data, index) => ({
+                                length: 60,
+                                offset: 60 * index,
+                                index,
+                            })}
                             initialNumToRender={20}
                             windowSize={11}
                             removeClippedSubviews={true}
@@ -522,6 +499,7 @@ export default function AppsScreen() {
                     </View>
                 )}
 
+                {/* Scroll to top button */}
                 {showScrollTop ? (
                     <TouchableOpacity
                         onPress={() => {
@@ -617,13 +595,19 @@ export default function AppsScreen() {
                     snapPoints={[200, "50%"]}
                     ref={bottomSheetRef}
                     onChange={handleSheetChanges}
-                    backdropComponent={(props) => (
-                        <BottomSheetBackdrop
-                            {...props}
-                            disappearsOnIndex={-1}
-                            appearsOnIndex={0}
-                            pressBehavior="close"
-                        />
+                    animationConfigs={{
+                        duration: 150,
+                    }}
+                    backdropComponent={useCallback(
+                        (props: BottomSheetBackdropProps) => (
+                            <BottomSheetBackdrop
+                                {...props}
+                                disappearsOnIndex={-1}
+                                appearsOnIndex={0}
+                                pressBehavior="close"
+                            />
+                        ),
+                        []
                     )}
                 >
                     <BottomSheetView style={styles.contentContainer}>
