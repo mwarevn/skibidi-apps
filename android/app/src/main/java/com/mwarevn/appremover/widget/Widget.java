@@ -2,6 +2,7 @@ package com.mwarevn.appremover.widget;
 
 import static com.facebook.react.modules.dialog.DialogModule.ACTION_BUTTON_CLICKED;
 
+import android.annotation.SuppressLint;
 import android.app.PendingIntent;
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
@@ -40,7 +41,7 @@ public class Widget extends AppWidgetProvider {
         intent.setData(Uri.parse(intent.toUri(Intent.URI_INTENT_SCHEME)));
 
         // Construct the RemoteViews object
-        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.app_leader);
+        @SuppressLint("RemoteViewLayout") RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.app_leader);
 
         // Set remote adapter cho ListView
         views.setRemoteAdapter(R.id.list_view, intent);

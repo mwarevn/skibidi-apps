@@ -1,3 +1,5 @@
+import { Colors } from "@/constants/theme";
+import { useColorScheme } from "@/hooks/use-color-scheme";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useCallback, useState } from "react";
 import { Image, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -10,6 +12,8 @@ type Props = {
 };
 
 function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress }: Props) {
+    const scheme = useColorScheme() ?? "light";
+    const colors = Colors[scheme];
     const isSelected = selectedApps.some((i: any) => i.packageName === item.packageName);
     const [isPressed, setIsPressed] = useState(false);
 
@@ -27,7 +31,11 @@ function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress }: 
 
     return (
         <Pressable
-            style={[styles.pressable, isSelected ? styles.selected : undefined, isPressed ? styles.pressed : undefined]}
+            style={[
+                styles.pressable,
+                isSelected ? { backgroundColor: scheme === "dark" ? "#0a2c3a" : "#e3f2fd" } : undefined,
+                isPressed ? { backgroundColor: scheme === "dark" ? "#1f1f1f" : "#f5f5f5" } : undefined,
+            ]}
             onLongPress={handleLongPress}
             onPressIn={() => setIsPressed(true)}
             onPressOut={() => setIsPressed(false)}
@@ -40,18 +48,18 @@ function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress }: 
                         resizeMode="cover"
                     />
                 ) : (
-                    <View style={[styles.icon, styles.placeholderIcon]} />
+                    <View style={[styles.icon, { backgroundColor: scheme === "dark" ? "#333" : "#ccc" }]} />
                 )}
                 <View style={styles.textContainer}>
-                    <Text style={styles.name}>{item.appName}</Text>
-                    <Text style={styles.pkg}>{item.packageName}</Text>
-                    {!item.enabled && <Text style={styles.disabledTag}>disabled</Text>}
+                    <Text style={[styles.name, { color: colors.text }]}>{item.appName}</Text>
+                    <Text style={[styles.pkg, { color: colors.icon }]}>{item.packageName}</Text>
+                    {!item.enabled && <Text style={[styles.disabledTag, { color: "orangered" }]}>disabled</Text>}
                 </View>
                 <TouchableOpacity onPress={handleCheckboxPress} style={styles.checkbox}>
                     <Ionicons
                         name={isSelected ? "checkbox" : "square-outline"}
                         size={24}
-                        color={isSelected ? "#007AFF" : "#ccc"}
+                        color={isSelected ? colors.tint : colors.icon}
                     />
                 </TouchableOpacity>
             </View>

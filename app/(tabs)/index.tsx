@@ -1,3 +1,4 @@
+import AlertModal, { AlertAction } from "@/components/AlertModal";
 import AppItem from "@/components/AppItem";
 import LayoutScreen from "@/components/ui/LayoutScreen";
 import { Colors } from "@/constants/theme";
@@ -9,7 +10,6 @@ import BottomSheet, { BottomSheetBackdrop, BottomSheetBackdropProps, BottomSheet
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     AppState,
     FlatList,
     Image,
@@ -37,6 +37,10 @@ export default function AppsScreen() {
     const [widgetAppsSet, setWidgetAppsSet] = useState<Set<string>>(new Set());
     const [shizukuAvailable, setShizukuAvailable] = useState<boolean | null>(null);
     const [shizukuHasPermission, setShizukuHasPermission] = useState<boolean>(false);
+    const [alertVisible, setAlertVisible] = useState(false);
+    const [alertTitle, setAlertTitle] = useState<string | undefined>(undefined);
+    const [alertMessage, setAlertMessage] = useState<string | undefined>(undefined);
+    const [alertActions, setAlertActions] = useState<AlertAction[] | undefined>(undefined);
 
     const runBatchAction = useCallback(
         async (items: any[], action: (pkg: string) => Promise<any>, successMsg: string, failMsg: string) => {
@@ -170,8 +174,7 @@ export default function AppsScreen() {
     // check if all filtered apps are selected
     const allSelected = useMemo(() => {
         return (
-            filteredApps.length > 0 &&
-            filteredApps.every((app) => selectedApps.some((s) => s.packageName === app.packageName))
+            filteredApps.length > 0 && filteredApps.every((app) => selectedApps.some((s) => s.packageName === app.packageName))
         );
     }, [filteredApps, selectedApps]);
 
@@ -303,14 +306,21 @@ export default function AppsScreen() {
                 if (!available) {
                     setShizukuHasPermission(false);
                     if (showPrompts) {
-                        Alert.alert(
-                            "Yêu cầu Shizuku",
-                            "Ứng dụng này yêu cầu app 'Shizuku' để hoạt động. Vui lòng cài đặt Shizuku từ Play Store. Hoặc bật dịch vụ Shizuku nếu bạn đã cài đặt.",
-                            [
-                                { text: "Cài đặt", onPress: () => openPlayStore() },
-                                { text: "Bỏ qua", style: "cancel" },
-                            ]
+                        setAlertTitle("Yêu cầu Shizuku");
+                        setAlertMessage(
+                            "Ứng dụng này yêu cầu app 'Shizuku' để hoạt động. Vui lòng cài đặt Shizuku từ Play Store. Hoặc bật dịch vụ Shizuku nếu bạn đã cài đặt."
                         );
+                        setAlertActions([
+                            { text: "Bỏ qua", style: "cancel", onPress: () => setAlertVisible(false) },
+                            {
+                                text: "Cài đặt",
+                                onPress: () => {
+                                    setAlertVisible(false);
+                                    openPlayStore();
+                                },
+                            },
+                        ]);
+                        setAlertVisible(true);
                     }
                     return;
                 }
@@ -319,21 +329,27 @@ export default function AppsScreen() {
                 setShizukuHasPermission(has);
 
                 if (!has && showPrompts) {
-                    Alert.alert("Yêu cầu ủy quyền", "Vui lòng ủy quyền Shizuku cho ứng dụng này!", [
+                    setAlertTitle("Yêu cầu ủy quyền");
+                    setAlertMessage("Vui lòng ủy quyền Shizuku cho ứng dụng này!");
+                    setAlertActions([
+                        {
+                            text: "Bỏ qua",
+                            style: "cancel",
+                            onPress: () => setAlertVisible(false),
+                        },
                         {
                             text: "Ủy quyền",
                             onPress: async () => {
+                                setAlertVisible(false);
                                 try {
-                                    // requestPermission may open Shizuku UI (external). Don't assume the return value
-                                    // represents the final state; re-check on app resume instead.
                                     await ShizukuModule.requestPermission();
                                 } catch (err) {
                                     console.error("Request permission error:", err);
                                 }
                             },
                         },
-                        { text: "Bỏ qua", style: "cancel" },
                     ]);
+                    setAlertVisible(true);
                 } else if (has) {
                     await AppManagerWrapper.ensureBound();
                 }
@@ -380,6 +396,13 @@ export default function AppsScreen() {
     return (
         <GestureHandlerRootView style={styles.container}>
             <LayoutScreen>
+                <AlertModal
+                    visible={alertVisible}
+                    title={alertTitle}
+                    message={alertMessage}
+                    actions={alertActions}
+                    onRequestClose={() => setAlertVisible(false)}
+                />
                 <Text
                     style={{
                         marginTop: 20,
@@ -412,7 +435,16 @@ export default function AppsScreen() {
                             value={search}
                             onChangeText={setSearch}
                             placeholder="Search by package name..."
-                            style={[styles.search, { paddingRight: 44 }]}
+                            style={[
+                                styles.search,
+                                {
+                                    paddingRight: 44,
+                                    backgroundColor: theme === "dark" ? "#222" : "#f0f0f0",
+                                    borderColor: theme === "dark" ? "#333" : "#ddd",
+                                    color: Colors[theme ?? "light"].text,
+                                },
+                            ]}
+                            placeholderTextColor={theme === "dark" ? "#9BA1A6" : "#939393a5"}
                             autoCapitalize="none"
                             autoCorrect={false}
                             returnKeyType="search"
@@ -440,36 +472,141 @@ export default function AppsScreen() {
                 <View style={styles.filtersContainer}>
                     <TouchableOpacity
                         onPress={() => setFilters((prev) => ({ ...prev, disabled: !prev.disabled }))}
-                        style={[styles.filterButton, filters.disabled && styles.filterButtonActive]}
+                        style={[
+                            styles.filterButton,
+                            {
+                                backgroundColor: filters.disabled
+                                    ? theme === "dark"
+                                        ? "#0a2c3a"
+                                        : Colors[theme ?? "light"].tint
+                                    : Colors[theme ?? "light"].background,
+                                borderColor: filters.disabled
+                                    ? Colors[theme ?? "light"].tint
+                                    : ((Colors[theme ?? "light"].icon + "33") as any),
+                            },
+                        ]}
                     >
-                        <Ionicons name="ban" size={16} color={filters.disabled ? "#fff" : "#666"} />
-                        <Text style={[styles.filterText, filters.disabled && styles.filterTextActive]}>Disabled</Text>
+                        <Ionicons
+                            name="ban"
+                            size={16}
+                            color={
+                                filters.disabled
+                                    ? theme === "dark"
+                                        ? Colors[theme ?? "light"].tint
+                                        : "#fff"
+                                    : Colors[theme ?? "light"].icon
+                            }
+                        />
+                        <Text
+                            style={[
+                                styles.filterText,
+                                {
+                                    color: filters.disabled
+                                        ? theme === "dark"
+                                            ? Colors[theme ?? "light"].tint
+                                            : "#fff"
+                                        : Colors[theme ?? "light"].icon,
+                                },
+                            ]}
+                        >
+                            Disabled
+                        </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                         onPress={() => setFilters((prev) => ({ ...prev, system: !prev.system }))}
-                        style={[styles.filterButton, filters.system && styles.filterButtonActive]}
+                        style={[
+                            styles.filterButton,
+                            {
+                                backgroundColor: filters.system
+                                    ? theme === "dark"
+                                        ? "#0a2c3a"
+                                        : Colors[theme ?? "light"].tint
+                                    : Colors[theme ?? "light"].background,
+                                borderColor: filters.system
+                                    ? Colors[theme ?? "light"].tint
+                                    : ((Colors[theme ?? "light"].icon + "33") as any),
+                            },
+                        ]}
                     >
-                        <Ionicons name="settings" size={16} color={filters.system ? "#fff" : "#666"} />
-                        <Text style={[styles.filterText, filters.system && styles.filterTextActive]}>System</Text>
+                        <Ionicons
+                            name="settings"
+                            size={16}
+                            color={
+                                filters.system
+                                    ? theme === "dark"
+                                        ? Colors[theme ?? "light"].tint
+                                        : "#fff"
+                                    : Colors[theme ?? "light"].icon
+                            }
+                        />
+                        <Text
+                            style={[
+                                styles.filterText,
+                                {
+                                    color: filters.system
+                                        ? theme === "dark"
+                                            ? Colors[theme ?? "light"].tint
+                                            : "#fff"
+                                        : Colors[theme ?? "light"].icon,
+                                },
+                            ]}
+                        >
+                            System
+                        </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                         onPress={() => setFilters((prev) => ({ ...prev, inWidget: !prev.inWidget }))}
-                        style={[styles.filterButton, filters.inWidget && styles.filterButtonActive]}
+                        style={[
+                            styles.filterButton,
+                            {
+                                backgroundColor: filters.inWidget
+                                    ? theme === "dark"
+                                        ? "#0a2c3a"
+                                        : Colors[theme ?? "light"].tint
+                                    : Colors[theme ?? "light"].background,
+                                borderColor: filters.inWidget
+                                    ? Colors[theme ?? "light"].tint
+                                    : ((Colors[theme ?? "light"].icon + "33") as any),
+                            },
+                        ]}
                     >
-                        <Ionicons name="star" size={16} color={filters.inWidget ? "#fff" : "#666"} />
-                        <Text style={[styles.filterText, filters.inWidget && styles.filterTextActive]}>In Widget</Text>
+                        <Ionicons
+                            name="star"
+                            size={16}
+                            color={
+                                filters.inWidget
+                                    ? theme === "dark"
+                                        ? Colors[theme ?? "light"].tint
+                                        : "#fff"
+                                    : Colors[theme ?? "light"].icon
+                            }
+                        />
+                        <Text
+                            style={[
+                                styles.filterText,
+                                {
+                                    color: filters.inWidget
+                                        ? theme === "dark"
+                                            ? Colors[theme ?? "light"].tint
+                                            : "#fff"
+                                        : Colors[theme ?? "light"].icon,
+                                },
+                            ]}
+                        >
+                            In Widget
+                        </Text>
                     </TouchableOpacity>
                 </View>
 
                 {loading ? (
                     <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
                         <ActivityIndicator size="large" color="#666" />
-                        <Text style={{ marginTop: 8, color: "#666" }}>Loading apps...</Text>
+                        <Text style={{ marginTop: 8, color: Colors[theme ?? "light"].icon }}>Loading apps...</Text>
                     </View>
                 ) : apps.length === 0 ? (
-                    <Text>Loading...</Text>
+                    <Text style={{ color: Colors[theme ?? "light"].text }}>Loading...</Text>
                 ) : filteredApps.length === 0 ? (
-                    <Text>No results for {`"${search}"`}</Text>
+                    <Text style={{ color: Colors[theme ?? "light"].text }}>No results for {`"${search}"`}</Text>
                 ) : (
                     <View style={{ flex: 1, paddingBottom: selectedApps.length > 0 ? 120 : 0, paddingHorizontal: 16 }}>
                         <FlatList
@@ -567,7 +704,7 @@ export default function AppsScreen() {
                                 style={[styles.actionButton, { backgroundColor: Colors[theme ?? "light"].background }]}
                             >
                                 <Ionicons name="ban-outline" size={20} color="grey" />
-                                <Text style={styles.actionButtonText}>Disable</Text>
+                                <Text style={[styles.actionButtonText, { color: Colors[theme ?? "light"].text }]}>Disable</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 onPress={() =>
@@ -595,17 +732,15 @@ export default function AppsScreen() {
                     snapPoints={[200, "50%"]}
                     ref={bottomSheetRef}
                     onChange={handleSheetChanges}
+                    backgroundStyle={{ backgroundColor: theme === "dark" ? "#121212" : "#ffffff" }}
+                    // handleStyle={{ backgroundColor: theme === "dark" ? "#1e1e1e" : "#f7f7f7" }}
+                    handleIndicatorStyle={{ backgroundColor: theme === "dark" ? "#555" : "#cfcfcf" }}
                     animationConfigs={{
                         duration: 150,
                     }}
                     backdropComponent={useCallback(
                         (props: BottomSheetBackdropProps) => (
-                            <BottomSheetBackdrop
-                                {...props}
-                                disappearsOnIndex={-1}
-                                appearsOnIndex={0}
-                                pressBehavior="close"
-                            />
+                            <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} pressBehavior="close" />
                         ),
                         []
                     )}
@@ -622,10 +757,19 @@ export default function AppsScreen() {
                                     </View>
                                 ) : null}
 
-                                <Text style={{ fontWeight: "700", fontSize: 16, marginBottom: 8 }}>
+                                <Text
+                                    style={{
+                                        fontWeight: "700",
+                                        fontSize: 16,
+                                        marginBottom: 8,
+                                        color: Colors[theme ?? "light"].text,
+                                    }}
+                                >
                                     {selectedApp.appName}
                                 </Text>
-                                <Text style={{ color: "#666", marginBottom: 12 }}>{selectedApp.packageName}</Text>
+                                <Text style={{ color: Colors[theme ?? "light"].icon, marginBottom: 12 }}>
+                                    {selectedApp.packageName}
+                                </Text>
 
                                 <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
                                     <TouchableOpacity
@@ -661,12 +805,14 @@ export default function AppsScreen() {
                                         style={{
                                             flex: 1,
                                             padding: 12,
-                                            backgroundColor: "#f0f0f0",
+                                            backgroundColor: theme === "dark" ? "#222" : "#f0f0f0",
                                             borderRadius: 8,
                                             marginRight: 8,
                                         }}
                                     >
-                                        <Text style={{ textAlign: "center" }}>Disable</Text>
+                                        <Text style={{ textAlign: "center", color: Colors[theme ?? "light"].text }}>
+                                            Disable
+                                        </Text>
                                     </TouchableOpacity>
 
                                     <TouchableOpacity
@@ -691,9 +837,16 @@ export default function AppsScreen() {
                                                 closeSheet();
                                             }
                                         }}
-                                        style={{ flex: 1, padding: 12, backgroundColor: "#f0f0f0", borderRadius: 8 }}
+                                        style={{
+                                            flex: 1,
+                                            padding: 12,
+                                            backgroundColor: theme === "dark" ? "#222" : "#f0f0f0",
+                                            borderRadius: 8,
+                                        }}
                                     >
-                                        <Text style={{ textAlign: "center" }}>Enable</Text>
+                                        <Text style={{ textAlign: "center", color: Colors[theme ?? "light"].text }}>
+                                            Enable
+                                        </Text>
                                     </TouchableOpacity>
                                 </View>
 
@@ -717,9 +870,15 @@ export default function AppsScreen() {
                                             closeSheet();
                                         }
                                     }}
-                                    style={{ padding: 12, backgroundColor: "#ffecb3", borderRadius: 8 }}
+                                    style={{
+                                        padding: 12,
+                                        backgroundColor: theme === "dark" ? "#705d26" : "#ffecb3",
+                                        borderRadius: 8,
+                                    }}
                                 >
-                                    <Text style={{ textAlign: "center" }}>Force Stop</Text>
+                                    <Text style={{ textAlign: "center", color: Colors[theme ?? "light"].text }}>
+                                        Force Stop
+                                    </Text>
                                 </TouchableOpacity>
                                 <View style={{ height: 12 }} />
 
@@ -736,9 +895,13 @@ export default function AppsScreen() {
                                         await loadApps(false);
                                         closeSheet();
                                     }}
-                                    style={{ padding: 12, backgroundColor: "#f0f0f0", borderRadius: 8 }}
+                                    style={{
+                                        padding: 12,
+                                        backgroundColor: theme === "dark" ? "#222" : "#f0f0f0",
+                                        borderRadius: 8,
+                                    }}
                                 >
-                                    <Text style={{ textAlign: "center" }}>
+                                    <Text style={{ textAlign: "center", color: Colors[theme ?? "light"].text }}>
                                         {selectedApp && widgetAppsSet.has(selectedApp.packageName)
                                             ? "Remove from Widget"
                                             : "Add to Widget"}
@@ -765,14 +928,18 @@ export default function AppsScreen() {
                                             closeSheet();
                                         }
                                     }}
-                                    style={{ padding: 12, backgroundColor: "#ffd6d6", borderRadius: 8 }}
+                                    style={{
+                                        padding: 12,
+                                        backgroundColor: theme === "dark" ? "#6b2b2b" : "#ffd6d6",
+                                        borderRadius: 8,
+                                    }}
                                 >
-                                    <Text style={{ textAlign: "center", color: "#900" }}>Uninstall</Text>
+                                    <Text style={{ textAlign: "center", color: "#ff5252" }}>Uninstall</Text>
                                 </TouchableOpacity>
                                 <View style={{ height: 12 }} />
                             </View>
                         ) : (
-                            <Text>Không có app được chọn</Text>
+                            <Text style={{ color: Colors[theme ?? "light"].text }}>Không có app được chọn</Text>
                         )}
                     </BottomSheetView>
                 </BottomSheet>
