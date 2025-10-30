@@ -2,17 +2,7 @@ import LayoutScreen from "@/components/ui/LayoutScreen";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
-import {
-    Alert,
-    FlatList,
-    Image,
-    NativeModules,
-    RefreshControl,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
-} from "react-native";
+import { Alert, FlatList, Image, NativeModules, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import Toast from "react-native-toast-message";
 
 const { SystemModule } = NativeModules;
@@ -22,7 +12,7 @@ interface WidgetApp {
     packageName: string;
     iconBase64?: string;
 }
-
+// vai ca lon
 export default function PermissionManager() {
     const [widgetApps, setWidgetApps] = useState<WidgetApp[]>([]);
     const [loading, setLoading] = useState(false);
@@ -103,9 +93,7 @@ export default function PermissionManager() {
 
     return (
         <LayoutScreen>
-            <Text style={{ fontWeight: "bold", fontSize: 18, marginLeft: 12, marginTop: 12 }}>
-                Ứng dụng trong widget
-            </Text>
+            <Text style={{ fontWeight: "bold", fontSize: 18, marginLeft: 12, marginTop: 12 }}>Ứng dụng trong widget</Text>
             <View style={styles.container}>
                 {loading ? (
                     <Text>Đang tải...</Text>
