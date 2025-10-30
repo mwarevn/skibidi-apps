@@ -1,8 +1,8 @@
 package com.mwarevn.appremover.widget;
 
+import static android.content.ContentValues.TAG;
 import static com.facebook.react.modules.dialog.DialogModule.ACTION_BUTTON_CLICKED;
 
-import android.annotation.SuppressLint;
 import android.app.PendingIntent;
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
@@ -10,8 +10,16 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.graphics.RenderEffect;
+import android.graphics.Shader;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.RemoteException;
 import android.util.Log;
 import android.widget.RemoteViews;
@@ -23,15 +31,20 @@ import com.mwarevn.appremover.react.modules.ServiceHolder;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Implementation of App Widget functionality.
  */
-public class Widget extends AppWidgetProvider {
+public class WidgetProvider extends AppWidgetProvider {
 
     public static final String EXTRA_PACKAGE_NAME = "com.mwarevn.appremover.widget";
     public static final String ACTION_FORCE_STOP = "force_stop";
     public static final String ACTION_TOGGLE_ENABLE = "toggle_state";
+
+    ExecutorService executor = Executors.newCachedThreadPool();
+    Handler handler = new Handler(Looper.getMainLooper());
 
     static void updateAppWidget(Context context, AppWidgetManager appWidgetManager,
                                 int appWidgetId) {
@@ -41,14 +54,14 @@ public class Widget extends AppWidgetProvider {
         intent.setData(Uri.parse(intent.toUri(Intent.URI_INTENT_SCHEME)));
 
         // Construct the RemoteViews object
-        @SuppressLint("RemoteViewLayout") RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.app_leader);
+        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.app_leader);
 
         // Set remote adapter cho ListView
         views.setRemoteAdapter(R.id.list_view, intent);
         views.setEmptyView(R.id.list_view, R.id.empty_view);
 
         // PendingIntent template
-        Intent templateIntent = new Intent(context, Widget.class);
+        Intent templateIntent = new Intent(context, WidgetProvider.class);
         templateIntent.setAction(ACTION_BUTTON_CLICKED);
 
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
@@ -61,8 +74,8 @@ public class Widget extends AppWidgetProvider {
 
         // Instruct the widget manager to update the widget
         appWidgetManager.updateAppWidget(appWidgetId, views);
-    }
 
+    }
     @Override
     public void onReceive(Context context, Intent intent) {
         super.onReceive(context, intent);
@@ -81,13 +94,20 @@ public class Widget extends AppWidgetProvider {
         }
 
         IAppManagerService service = ServiceHolder.getServiceApi();
-        if (service != null) {
-            executeAction(context, action, pkg, enabled);
-        } else {
-            WidgetShizukuBinder.bindIfNeeded(context, () -> {
+
+        executor.execute(() -> {
+            handler.post(() -> Toast.makeText(context, "Running action: " + action + " on " + pkg, Toast.LENGTH_SHORT).show());
+            if (service != null) {
                 executeAction(context, action, pkg, enabled);
-            });
-        }
+            } else {
+                WidgetShizukuBinder.bindIfNeeded(context, () -> {
+                    executeAction(context, action, pkg, enabled);
+                });
+            }
+        });
+
+        executor.shutdown();
+
     }
 
     private void updateWidgetDataAfterToggle(Context context, String pkg, boolean newEnabled) {
@@ -119,7 +139,7 @@ public class Widget extends AppWidgetProvider {
             if ("force_stop".equals(action)) {
                 service.forceStopPackage(pkg);
                 service.revokeAllPermissions(pkg);
-                Toast.makeText(context, "Force stopped " + pkg, Toast.LENGTH_SHORT).show();
+                handler.post(() -> Toast.makeText(context, "Force stopped " + pkg, Toast.LENGTH_SHORT).show());
             } else if ("toggle_enable".equals(action)) {
                 if (enabled) {
                     service.disablePackage(pkg);
@@ -128,19 +148,22 @@ public class Widget extends AppWidgetProvider {
                     service.enablePackage(pkg);
                     updateWidgetDataAfterToggle(context, pkg, true);
                 }
-                Toast.makeText(context, enabled ? "Disabled " : "Enabled " + pkg, Toast.LENGTH_SHORT).show();
+                handler.post(() -> Toast.makeText(context,  enabled ? "Disabled " : "Enabled " + pkg, Toast.LENGTH_SHORT).show());
+
             }
         } catch (RemoteException e) {
-            Toast.makeText(context, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            handler.post(() -> Toast.makeText(context, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+
         }
 
-        updateAllWidgets(context);
+       handler.post(() -> {
+           updateAllWidgets(context);
+       });
     }
-
 
     private void updateAllWidgets(Context context) {
         AppWidgetManager mgr = AppWidgetManager.getInstance(context);
-        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, Widget.class));
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, WidgetProvider.class));
         mgr.notifyAppWidgetViewDataChanged(ids, R.id.list_view);
     }
 
@@ -169,6 +192,7 @@ public class Widget extends AppWidgetProvider {
     @Override
     public void onDisabled(Context context) {
         super.onDisabled(context);
+
         Intent intent = new Intent(context, WidgetUpdateService.class);
         context.stopService(intent);
     }

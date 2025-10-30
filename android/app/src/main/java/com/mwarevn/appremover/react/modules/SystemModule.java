@@ -23,7 +23,7 @@ import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
 import com.mwarevn.appremover.R;
-import com.mwarevn.appremover.widget.Widget;
+import com.mwarevn.appremover.widget.WidgetProvider;
 
 import java.io.ByteArrayOutputStream;
 import java.util.List;
@@ -48,7 +48,7 @@ public class SystemModule extends ReactContextBaseJavaModule {
 
     private void updateWidgetAfterDataChange() {
         AppWidgetManager appWidgetManager = AppWidgetManager.getInstance(reactContext);
-        int[] ids = appWidgetManager.getAppWidgetIds(new ComponentName(reactContext, Widget.class));
+        int[] ids = appWidgetManager.getAppWidgetIds(new ComponentName(reactContext, WidgetProvider.class));
         if (ids.length > 0) {
             appWidgetManager.notifyAppWidgetViewDataChanged(ids, R.id.list_view);
         }
@@ -72,51 +72,6 @@ public class SystemModule extends ReactContextBaseJavaModule {
             promise.resolve(true);
         }, 100);
         promise.resolve(true);
-    }
-
-    @ReactMethod
-    public void getInstalledApps(Promise promise) {
-        try {
-            PackageManager pm = reactContext.getPackageManager();
-            List<PackageInfo> packages;
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                packages = pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(PackageManager.GET_META_DATA));
-            } else {
-                packages = pm.getInstalledPackages(PackageManager.GET_META_DATA);
-            }
-
-            WritableArray appList = Arguments.createArray();
-
-            for (PackageInfo pkg : packages) {
-                ApplicationInfo appInfo = pkg.applicationInfo;
-
-                WritableMap appMap = Arguments.createMap();
-                appMap.putString("appName", pm.getApplicationLabel(appInfo).toString());
-                appMap.putString("packageName", pkg.packageName);
-                appMap.putString("versionName", pkg.versionName);
-                appMap.putInt("versionCode", pkg.versionCode);
-                appMap.putBoolean("isSystemApp", (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0);
-                appMap.putBoolean("isUpdatedSystemApp", (appInfo.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0);
-                appMap.putBoolean("enabled", appInfo.enabled);
-
-                // ✅ Lấy icon app -> Base64
-                try {
-                    Drawable icon = pm.getApplicationIcon(appInfo);
-                    String base64Icon = drawableToBase64(icon);
-                    appMap.putString("iconBase64", base64Icon);
-                } catch (Exception e) {
-                    appMap.putString("iconBase64", null);
-                }
-
-                appList.pushMap(appMap);
-            }
-
-            promise.resolve(appList);
-
-        } catch (Exception e) {
-            promise.reject("ERR_GET_APPS", e);
-        }
     }
 
     @SuppressLint("WrongConstant")

@@ -87,6 +87,7 @@ android {
         buildConfig = true
         viewBinding = true
         aidl true
+//        renderScript true
     }
 
     ndkVersion rootProject.ext.ndkVersion
@@ -97,6 +98,7 @@ android {
     namespace 'com.mwarevn.appremover'
     defaultConfig {
         applicationId 'com.mwarevn.appremover'
+//        renderscriptSupportModeEnabled true
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

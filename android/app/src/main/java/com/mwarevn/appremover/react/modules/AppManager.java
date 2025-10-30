@@ -15,7 +15,7 @@ import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.WritableMap;
 import com.mwarevn.appremover.IAppManagerService;
 import com.mwarevn.appremover.R;
-import com.mwarevn.appremover.widget.Widget;
+import com.mwarevn.appremover.widget.WidgetProvider;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,7 +34,64 @@ public class AppManager extends ReactContextBaseJavaModule {
 
     private BroadcastReceiver widgetActionReceiver;
     private static final String TAG = "AppManager";
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final ExecutorService executor = Executors.newCachedThreadPool();
+
+    private Promise pms = new Promise() {
+        @Override
+        public void reject(@NonNull String s) {
+
+        }
+
+        @Override
+        public void reject(@Nullable String s, @Nullable String s1, @Nullable Throwable throwable, @Nullable WritableMap writableMap) {
+
+        }
+
+        @Override
+        public void reject(@NonNull String s, @Nullable String s1, @NonNull WritableMap writableMap) {
+
+        }
+
+        @Override
+        public void reject(@NonNull String s, @Nullable Throwable throwable, @NonNull WritableMap writableMap) {
+
+        }
+
+        @Override
+        public void reject(@NonNull String s, @NonNull WritableMap writableMap) {
+
+        }
+
+        @Override
+        public void reject(@NonNull Throwable throwable, @NonNull WritableMap writableMap) {
+
+        }
+
+        @Override
+        public void reject(@NonNull Throwable throwable) {
+
+        }
+
+        @Override
+        public void reject(@NonNull String s, @Nullable String s1, @Nullable Throwable throwable) {
+
+        }
+
+        @Override
+        public void reject(@NonNull String s, @Nullable Throwable throwable) {
+
+        }
+
+        @Override
+        public void reject(@NonNull String s, @Nullable String s1) {
+
+        }
+
+        @Override
+        public void resolve(@Nullable Object o) {
+
+        }
+    };
 
     public AppManager(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -43,81 +100,31 @@ public class AppManager extends ReactContextBaseJavaModule {
             @Override
             public void onReceive(Context context, Intent intent) {
                 String action = intent.getAction();
-                String pkg = intent.getStringExtra(Widget.EXTRA_PACKAGE_NAME);
+                String pkg = intent.getStringExtra(WidgetProvider.EXTRA_PACKAGE_NAME);
+                boolean enabled = intent.getBooleanExtra("enabled", true);
 
                 if (pkg == null) return;
 
-                if (Widget.ACTION_FORCE_STOP.equals(action)) {
-                    forceStopPackage(pkg, new Promise() {
-                        @Override
-                        public void resolve(@Nullable Object o) {
-
-                        }
-
-                        @Override
-                        public void reject(@NonNull String s, @Nullable String s1) {
-
-                        }
-
-                        @Override
-                        public void reject(@NonNull String s, @Nullable Throwable throwable) {
-
-                        }
-
-                        @Override
-                        public void reject(@NonNull String s, @Nullable String s1, @Nullable Throwable throwable) {
-
-                        }
-
-                        @Override
-                        public void reject(@NonNull Throwable throwable) {
-
-                        }
-
-                        @Override
-                        public void reject(@NonNull Throwable throwable, @NonNull WritableMap writableMap) {
-
-                        }
-
-                        @Override
-                        public void reject(@NonNull String s, @NonNull WritableMap writableMap) {
-
-                        }
-
-                        @Override
-                        public void reject(@NonNull String s, @Nullable Throwable throwable, @NonNull WritableMap writableMap) {
-
-                        }
-
-                        @Override
-                        public void reject(@NonNull String s, @Nullable String s1, @NonNull WritableMap writableMap) {
-
-                        }
-
-                        @Override
-                        public void reject(@Nullable String s, @Nullable String s1, @Nullable Throwable throwable, @Nullable WritableMap writableMap) {
-
-                        }
-
-                        @Override
-                        public void reject(@NonNull String s) {
-
-                        }
-                    });
-                } else if (Widget.ACTION_TOGGLE_ENABLE.equals(action)) {
-//                    togglePackageEnabled(pkg);
+                if (WidgetProvider.ACTION_FORCE_STOP.equals(action)) {
+                    forceStopPackage(pkg, pms);
+                } else if (WidgetProvider.ACTION_TOGGLE_ENABLE.equals(action)) {
+                    if (enabled) {
+                        enablePackage(pkg, pms);
+                    } else {
+                        disablePackage(pkg, pms);
+                    }
                 }
 
                 AppWidgetManager mgr = AppWidgetManager.getInstance(context);
-                int[] ids = mgr.getAppWidgetIds(new ComponentName(context, Widget.class));
+                int[] ids = mgr.getAppWidgetIds(new ComponentName(context, WidgetProvider.class));
                 mgr.notifyAppWidgetViewDataChanged(ids, R.id.list_view);
             }
         };
 
         // Đăng ký receiver
         IntentFilter filter = new IntentFilter();
-        filter.addAction(Widget.ACTION_FORCE_STOP);
-        filter.addAction(Widget.ACTION_TOGGLE_ENABLE);
+        filter.addAction(WidgetProvider.ACTION_FORCE_STOP);
+        filter.addAction(WidgetProvider.ACTION_TOGGLE_ENABLE);
         ContextCompat.registerReceiver(reactContext, widgetActionReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
@@ -185,7 +192,7 @@ public class AppManager extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void forceStopPackage(String packageName, Promise promise) {
+    public void forceStopPackage(String packageName,Promise promise) {
         if (!checkService(promise)) return;
         executor.execute(() -> {
             try {

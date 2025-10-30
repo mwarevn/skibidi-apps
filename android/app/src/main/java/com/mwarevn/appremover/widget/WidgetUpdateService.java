@@ -28,7 +28,7 @@ public class WidgetUpdateService extends Service {
 
     private void updateWidget() {
         AppWidgetManager appWidgetManager = AppWidgetManager.getInstance(this);
-        ComponentName widgetComponent = new ComponentName(this, Widget.class);
+        ComponentName widgetComponent = new ComponentName(this, WidgetProvider.class);
         int[] ids = appWidgetManager.getAppWidgetIds(widgetComponent);
         if (ids.length > 0) {
             appWidgetManager.notifyAppWidgetViewDataChanged(ids, R.id.list_view);

@@ -174,7 +174,8 @@ export default function AppsScreen() {
     // check if all filtered apps are selected
     const allSelected = useMemo(() => {
         return (
-            filteredApps.length > 0 && filteredApps.every((app) => selectedApps.some((s) => s.packageName === app.packageName))
+            filteredApps.length > 0 &&
+            filteredApps.every((app) => selectedApps.some((s) => s.packageName === app.packageName))
         );
     }, [filteredApps, selectedApps]);
 
@@ -362,7 +363,7 @@ export default function AppsScreen() {
         [openPlayStore]
     );
 
-    React.useEffect(() => {
+    useEffect(() => {
         // show prompts once when apps are first loaded so user can install/grant Shizuku
         if (apps.length > 0) checkShizuku(true);
     }, [apps, checkShizuku]);
@@ -704,7 +705,9 @@ export default function AppsScreen() {
                                 style={[styles.actionButton, { backgroundColor: Colors[theme ?? "light"].background }]}
                             >
                                 <Ionicons name="ban-outline" size={20} color="grey" />
-                                <Text style={[styles.actionButtonText, { color: Colors[theme ?? "light"].text }]}>Disable</Text>
+                                <Text style={[styles.actionButtonText, { color: Colors[theme ?? "light"].text }]}>
+                                    Disable
+                                </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 onPress={() =>
@@ -740,7 +743,12 @@ export default function AppsScreen() {
                     }}
                     backdropComponent={useCallback(
                         (props: BottomSheetBackdropProps) => (
-                            <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} pressBehavior="close" />
+                            <BottomSheetBackdrop
+                                {...props}
+                                disappearsOnIndex={-1}
+                                appearsOnIndex={0}
+                                pressBehavior="close"
+                            />
                         ),
                         []
                     )}
