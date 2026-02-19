@@ -25,7 +25,9 @@ import com.facebook.react.bridge.WritableMap;
 import com.mwarevn.appremover.R;
 import com.mwarevn.appremover.widget.WidgetProvider;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.InputStreamReader;
 import java.util.List;
 
 public class SystemModule extends ReactContextBaseJavaModule {
@@ -125,6 +127,19 @@ public class SystemModule extends ReactContextBaseJavaModule {
 
         } catch (Exception e) {
             promise.reject("ERR_GET_ALL_APPS", e.getMessage());
+        }
+    }
+
+    @ReactMethod
+    public void isRootAvailable(Promise promise) {
+        try {
+            Process process = Runtime.getRuntime().exec("su -c echo test");
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String line = reader.readLine();
+            int exitCode = process.waitFor();
+            promise.resolve(exitCode == 0 && "test".equals(line));
+        } catch (Exception e) {
+            promise.resolve(false);
         }
     }
 

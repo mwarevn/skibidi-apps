@@ -8,6 +8,7 @@ import com.mwarevn.appremover.react.modules.ShizukuModule;
 import com.mwarevn.appremover.react.modules.AppManager;
 import com.mwarevn.appremover.react.modules.AppManagerBinder;
 import com.mwarevn.appremover.react.modules.SystemModule;
+import com.mwarevn.appremover.react.modules.RootModule;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -21,6 +22,7 @@ public class SystemPackage implements ReactPackage {
         modules.add(new ShizukuModule(reactContext));
         modules.add(new AppManagerBinder(reactContext));
         modules.add(new AppManager(reactContext));
+        modules.add(new RootModule(reactContext));
         return modules;
     }
 

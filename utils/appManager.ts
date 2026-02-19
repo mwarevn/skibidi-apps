@@ -1,9 +1,15 @@
 import { NativeModules } from "react-native";
 
-const { ShizukuModule, AppManager, AppManagerBinder } = NativeModules as any;
+const { ShizukuModule, AppManager, AppManagerBinder, RootModule } = NativeModules as any;
 
 const DEFAULT_TIMEOUT = 10000;
 const POLL_INTERVAL = 500;
+
+let currentPermission: "shizuku" | "root" = "shizuku";
+
+export function setPermission(perm: "shizuku" | "root") {
+    currentPermission = perm;
+}
 
 async function ensureShizukuPermission(): Promise<boolean> {
     try {
@@ -67,14 +73,21 @@ async function callSafe(method: string, ...args: any[]) {
         throw new Error("Invalid package name");
     }
 
-    if (!isAppManagerReady()) {
-        const bound = await ensureBound();
-        if (!bound) throw new Error("AppManager not ready");
+    // Check permission type
+    if (currentPermission === "root") {
+        if (!RootModule || typeof RootModule[method] !== "function") throw new Error("Root method not available");
+        return RootModule[method](...args);
+    } else {
+        // Shizuku path
+        if (!isAppManagerReady()) {
+            const bound = await ensureBound();
+            if (!bound) throw new Error("AppManager not ready");
+        }
+
+        if (!AppManager || typeof AppManager[method] !== "function") throw new Error("Method not available");
+
+        return AppManager[method](...args);
     }
-
-    if (!AppManager || typeof AppManager[method] !== "function") throw new Error("Method not available");
-
-    return AppManager[method](...args);
 }
 
 export const AppManagerWrapper = {

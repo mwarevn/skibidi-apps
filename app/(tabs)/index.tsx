@@ -3,10 +3,11 @@ import AppItem from "@/components/AppItem";
 import LayoutScreen from "@/components/ui/LayoutScreen";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import AppManagerWrapper from "@/utils/appManager";
+import { usePermission } from "@/hooks/usePermission";
+import AppManagerWrapper, { setPermission } from "@/utils/appManager";
 import { openPlayStore } from "@/utils/common";
-import Ionicons from "@expo/vector-icons/Ionicons";
 import BottomSheet, { BottomSheetBackdrop, BottomSheetBackdropProps, BottomSheetView } from "@gorhom/bottom-sheet";
+import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
@@ -20,13 +21,28 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { Button, Chip, FAB, IconButton, Text as PaperText, Surface, useTheme } from "react-native-paper";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
 
 const { SystemModule, ShizukuModule } = NativeModules;
 
 export default function AppsScreen() {
     const theme = useColorScheme();
+    const { permission, isLoading } = usePermission();
+    const router = useRouter();
+    const paperTheme = useTheme();
+
+    useEffect(() => {
+        if (!isLoading) {
+            if (permission) {
+                setPermission(permission);
+            } else {
+                // No permission selected, navigate to permission select screen
+                router.push("/permission-select");
+            }
+        }
+    }, [permission, isLoading]);
 
     const [selectedApps, setSelectedApps] = useState<any[]>([]);
     const [selectedApp, setSelectedApp] = useState<any | null>(null);
@@ -48,8 +64,8 @@ export default function AppsScreen() {
                 items.map((pkg: any) =>
                     action(pkg.packageName)
                         .then((res: any) => ({ pkg: pkg.packageName, status: "fulfilled", res }))
-                        .catch((err: any) => ({ pkg: pkg.packageName, status: "rejected", reason: err }))
-                )
+                        .catch((err: any) => ({ pkg: pkg.packageName, status: "rejected", reason: err })),
+                ),
             );
 
             const failures = results.filter((r: any) => r.status === "rejected");
@@ -63,7 +79,7 @@ export default function AppsScreen() {
 
             await loadApps(false).finally(() => setSelectedApps([]));
         },
-        []
+        [],
     );
 
     // ref
@@ -79,7 +95,7 @@ export default function AppsScreen() {
                 setSelectedApp(null);
             }
         },
-        [setSelectedApp]
+        [setSelectedApp],
     );
 
     const handleOpenSheetForApp = useCallback((app: any) => {
@@ -206,7 +222,7 @@ export default function AppsScreen() {
                 onLongPress={handleOpenSheetForApp}
             />
         ),
-        [selectedApps, setSelectedApps, handleOpenSheetForApp]
+        [selectedApps, setSelectedApps, handleOpenSheetForApp],
     );
 
     const addToWidget = async (itemData: any) => {
@@ -297,9 +313,17 @@ export default function AppsScreen() {
         loadApps(true);
     }, []);
 
-    // consolidated Shizuku check: runs when apps load and when screen focuses
-    const checkShizuku = useCallback(
+    // consolidated permission check: runs when apps load and when screen focuses
+    const checkPermissions = useCallback(
         async (showPrompts = true) => {
+            if (permission === "root") {
+                // For root, no need to check Shizuku
+                setShizukuAvailable(null);
+                setShizukuHasPermission(false);
+                return;
+            }
+
+            // Shizuku check
             try {
                 const available = Boolean(await ShizukuModule.isShizukuAvailable());
                 setShizukuAvailable(available);
@@ -309,7 +333,7 @@ export default function AppsScreen() {
                     if (showPrompts) {
                         setAlertTitle("Yêu cầu Shizuku");
                         setAlertMessage(
-                            "Ứng dụng này yêu cầu app 'Shizuku' để hoạt động. Vui lòng cài đặt Shizuku từ Play Store. Hoặc bật dịch vụ Shizuku nếu bạn đã cài đặt."
+                            "Ứng dụng này yêu cầu app 'Shizuku' để hoạt động. Vui lòng cài đặt Shizuku từ Play Store. Hoặc bật dịch vụ Shizuku nếu bạn đã cài đặt.",
                         );
                         setAlertActions([
                             { text: "Bỏ qua", style: "cancel", onPress: () => setAlertVisible(false) },
@@ -360,20 +384,20 @@ export default function AppsScreen() {
                 setShizukuHasPermission(false);
             }
         },
-        [openPlayStore]
+        [permission, openPlayStore],
     );
 
     useEffect(() => {
-        // show prompts once when apps are first loaded so user can install/grant Shizuku
-        if (apps.length > 0) checkShizuku(true);
-    }, [apps, checkShizuku]);
+        // show prompts once when apps are first loaded so user can install/grant permission
+        if (apps.length > 0) checkPermissions(true);
+    }, [apps, checkPermissions]);
 
-    // Re-check Shizuku when app returns to foreground (onResume behavior)
+    // Re-check permission when app returns to foreground (onResume behavior)
     useEffect(() => {
         const handler = (nextAppState: string) => {
             if (nextAppState === "active") {
                 // when app becomes active again, re-check and show prompts if needed
-                checkShizuku(true);
+                checkPermissions(true);
             }
         };
 
@@ -392,10 +416,10 @@ export default function AppsScreen() {
                 // ignore
             }
         };
-    }, [checkShizuku]);
+    }, [checkPermissions]);
 
     return (
-        <GestureHandlerRootView style={styles.container}>
+        <SafeAreaView style={styles.container}>
             <LayoutScreen>
                 <AlertModal
                     visible={alertVisible}
@@ -404,31 +428,88 @@ export default function AppsScreen() {
                     actions={alertActions}
                     onRequestClose={() => setAlertVisible(false)}
                 />
-                <Text
+                {/* <Card style={{ marginTop: 8, marginHorizontal: 16, paddingVertical: 8, paddingHorizontal: 12 }}>
+                    <PaperText
+                        variant="bodyMedium"
+                        style={{
+                            color:
+                                permission === "root"
+                                    ? paperTheme.colors.primary
+                                    : shizukuAvailable
+                                      ? shizukuHasPermission
+                                          ? paperTheme.colors.primary
+                                          : paperTheme.colors.secondary
+                                      : paperTheme.colors.error,
+                            fontWeight: "500",
+                            textAlign: "center",
+                        }}
+                    >
+                        {permission === "root"
+                            ? "Root mode"
+                            : shizukuAvailable === null
+                              ? "Checking..."
+                              : shizukuAvailable
+                                ? shizukuHasPermission
+                                    ? "Shizuku Mode"
+                                    : "Need Permission"
+                                : "No Shizuku"}
+                    </PaperText>
+                </Card> */}
+
+                <View
                     style={{
-                        marginTop: 20,
-                        color: shizukuAvailable ? (shizukuHasPermission ? "#2e7d32" : "#f9a825") : "#d32f2f",
-                        fontWeight: "bold",
-                        fontSize: 18,
-                        marginStart: 18,
+                        position: "absolute",
+                        top: 20,
+                        right: 20,
+                        display: "flex",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                        zIndex: 10,
                     }}
                 >
-                    {shizukuAvailable === null
-                        ? "Checking Shizuku..."
-                        : shizukuAvailable
-                        ? shizukuHasPermission
-                            ? "Shizuku Authorized"
-                            : "Shizuku Needs Permission"
-                        : "Shizuku Not Installed"}
-                </Text>
-                <Text style={{ marginStart: 20, fontWeight: "bold", fontSize: 12, opacity: 0.2 }}>mwarevn</Text>
+                    <PaperText
+                        variant="bodyMedium"
+                        style={{
+                            color:
+                                permission === "root"
+                                    ? paperTheme.colors.primary
+                                    : shizukuAvailable
+                                      ? shizukuHasPermission
+                                          ? paperTheme.colors.primary
+                                          : paperTheme.colors.secondary
+                                      : paperTheme.colors.error,
+                            fontWeight: "500",
+                            textAlign: "center",
+                        }}
+                    >
+                        {permission === "root"
+                            ? "Root mode"
+                            : shizukuAvailable === null
+                              ? "Checking..."
+                              : shizukuAvailable
+                                ? shizukuHasPermission
+                                    ? "Shizuku Mode"
+                                    : "Need Permission"
+                                : "No Shizuku"}
+                    </PaperText>
+                    <IconButton
+                        icon="cog"
+                        size={24}
+                        onPress={() => router.push("/permission-select")}
+                        style={{
+                            backgroundColor: paperTheme.colors.surfaceVariant,
+                        }}
+                        iconColor={paperTheme.colors.onSurfaceVariant}
+                    />
+                </View>
 
-                <View>
+                <View style={{ marginVertical: 8, marginTop: 16 }}>
                     <View
                         style={{
-                            width: "100%",
+                            width: "93%",
                             marginHorizontal: "auto",
-                            marginTop: 28,
+                            marginTop: 16,
                             position: "relative",
                         }}
                     >
@@ -436,180 +517,164 @@ export default function AppsScreen() {
                             value={search}
                             onChangeText={setSearch}
                             placeholder="Search by package name..."
-                            style={[
-                                styles.search,
-                                {
-                                    paddingRight: 44,
-                                    backgroundColor: theme === "dark" ? "#222" : "#f0f0f0",
-                                    borderColor: theme === "dark" ? "#333" : "#ddd",
-                                    color: Colors[theme ?? "light"].text,
-                                },
-                            ]}
-                            placeholderTextColor={theme === "dark" ? "#9BA1A6" : "#939393a5"}
+                            style={{
+                                height: 48,
+                                borderRadius: 24,
+                                paddingHorizontal: 16,
+                                paddingRight: 48,
+                                backgroundColor: paperTheme.colors.surfaceVariant,
+                                color: paperTheme.colors.onSurface,
+                                fontSize: 16,
+                            }}
+                            placeholderTextColor={paperTheme.colors.onSurfaceVariant}
                             autoCapitalize="none"
                             autoCorrect={false}
                             returnKeyType="search"
                         />
-                        <TouchableOpacity
+                        <IconButton
+                            icon="magnify"
+                            size={20}
                             style={{
                                 position: "absolute",
-                                right: 28,
-                                top: 0,
-                                bottom: 0,
-                                justifyContent: "center",
-                                alignItems: "center",
-                                padding: 8,
+                                right: 2,
+                                top: 2,
                             }}
-                        >
-                            <Ionicons name="search" size={20} color="#939393a5" />
-                        </TouchableOpacity>
+                            iconColor={paperTheme.colors.onSurfaceVariant}
+                        />
                     </View>
 
-                    <Text style={{ marginTop: 8, marginStart: 32, fontSize: 11 }}>
+                    <Text
+                        style={{
+                            marginTop: 4,
+                            marginStart: 32,
+                            fontSize: 11,
+                            color: paperTheme.colors.onSurfaceVariant,
+                        }}
+                    >
                         * {filteredApps.length}/{apps.length}
                     </Text>
                 </View>
 
-                <View style={styles.filtersContainer}>
-                    <TouchableOpacity
+                <View
+                    style={{
+                        flexDirection: "row",
+                        justifyContent: "center",
+                        marginTop: 8,
+                        marginHorizontal: 16,
+                        gap: 4,
+                        marginBottom: 8,
+                    }}
+                >
+                    <Chip
+                        icon="cancel"
+                        selected={filters.disabled}
                         onPress={() => setFilters((prev) => ({ ...prev, disabled: !prev.disabled }))}
-                        style={[
-                            styles.filterButton,
-                            {
-                                backgroundColor: filters.disabled
-                                    ? theme === "dark"
-                                        ? "#0a2c3a"
-                                        : Colors[theme ?? "light"].tint
-                                    : Colors[theme ?? "light"].background,
-                                borderColor: filters.disabled
-                                    ? Colors[theme ?? "light"].tint
-                                    : ((Colors[theme ?? "light"].icon + "33") as any),
-                            },
-                        ]}
+                        style={{
+                            flex: 1,
+                            height: 32,
+                            backgroundColor: filters.disabled
+                                ? paperTheme.colors.primaryContainer
+                                : paperTheme.colors.surface,
+                        }}
+                        textStyle={{ fontSize: 12 }}
+                        mode="flat"
                     >
-                        <Ionicons
-                            name="ban"
-                            size={16}
-                            color={
-                                filters.disabled
-                                    ? theme === "dark"
-                                        ? Colors[theme ?? "light"].tint
-                                        : "#fff"
-                                    : Colors[theme ?? "light"].icon
-                            }
-                        />
-                        <Text
-                            style={[
-                                styles.filterText,
-                                {
-                                    color: filters.disabled
-                                        ? theme === "dark"
-                                            ? Colors[theme ?? "light"].tint
-                                            : "#fff"
-                                        : Colors[theme ?? "light"].icon,
-                                },
-                            ]}
-                        >
-                            Disabled
-                        </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
+                        Disabled
+                    </Chip>
+                    <Chip
+                        icon="cog"
+                        selected={filters.system}
                         onPress={() => setFilters((prev) => ({ ...prev, system: !prev.system }))}
-                        style={[
-                            styles.filterButton,
-                            {
-                                backgroundColor: filters.system
-                                    ? theme === "dark"
-                                        ? "#0a2c3a"
-                                        : Colors[theme ?? "light"].tint
-                                    : Colors[theme ?? "light"].background,
-                                borderColor: filters.system
-                                    ? Colors[theme ?? "light"].tint
-                                    : ((Colors[theme ?? "light"].icon + "33") as any),
-                            },
-                        ]}
+                        style={{
+                            flex: 1,
+                            height: 32,
+                            backgroundColor: filters.system
+                                ? paperTheme.colors.primaryContainer
+                                : paperTheme.colors.surface,
+                        }}
+                        textStyle={{ fontSize: 12 }}
+                        mode="flat"
                     >
-                        <Ionicons
-                            name="settings"
-                            size={16}
-                            color={
-                                filters.system
-                                    ? theme === "dark"
-                                        ? Colors[theme ?? "light"].tint
-                                        : "#fff"
-                                    : Colors[theme ?? "light"].icon
-                            }
-                        />
-                        <Text
-                            style={[
-                                styles.filterText,
-                                {
-                                    color: filters.system
-                                        ? theme === "dark"
-                                            ? Colors[theme ?? "light"].tint
-                                            : "#fff"
-                                        : Colors[theme ?? "light"].icon,
-                                },
-                            ]}
-                        >
-                            System
-                        </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
+                        System
+                    </Chip>
+                    <Chip
+                        icon="star"
+                        selected={filters.inWidget}
                         onPress={() => setFilters((prev) => ({ ...prev, inWidget: !prev.inWidget }))}
-                        style={[
-                            styles.filterButton,
-                            {
-                                backgroundColor: filters.inWidget
-                                    ? theme === "dark"
-                                        ? "#0a2c3a"
-                                        : Colors[theme ?? "light"].tint
-                                    : Colors[theme ?? "light"].background,
-                                borderColor: filters.inWidget
-                                    ? Colors[theme ?? "light"].tint
-                                    : ((Colors[theme ?? "light"].icon + "33") as any),
-                            },
-                        ]}
+                        style={{
+                            flex: 1,
+                            height: 32,
+                            backgroundColor: filters.inWidget
+                                ? paperTheme.colors.primaryContainer
+                                : paperTheme.colors.surface,
+                        }}
+                        textStyle={{ fontSize: 12 }}
+                        mode="flat"
                     >
-                        <Ionicons
-                            name="star"
-                            size={16}
-                            color={
-                                filters.inWidget
-                                    ? theme === "dark"
-                                        ? Colors[theme ?? "light"].tint
-                                        : "#fff"
-                                    : Colors[theme ?? "light"].icon
-                            }
-                        />
-                        <Text
-                            style={[
-                                styles.filterText,
-                                {
-                                    color: filters.inWidget
-                                        ? theme === "dark"
-                                            ? Colors[theme ?? "light"].tint
-                                            : "#fff"
-                                        : Colors[theme ?? "light"].icon,
-                                },
-                            ]}
-                        >
-                            In Widget
-                        </Text>
-                    </TouchableOpacity>
+                        In Widget
+                    </Chip>
                 </View>
 
                 {loading ? (
-                    <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-                        <ActivityIndicator size="large" color="#666" />
-                        <Text style={{ marginTop: 8, color: Colors[theme ?? "light"].icon }}>Loading apps...</Text>
+                    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 32 }}>
+                        <ActivityIndicator size="large" animating={true} color={paperTheme.colors.primary} />
+                        <PaperText
+                            variant="bodyLarge"
+                            style={{
+                                marginTop: 16,
+                                color: paperTheme.colors.onSurfaceVariant,
+                                textAlign: "center",
+                            }}
+                        >
+                            Loading apps...
+                        </PaperText>
                     </View>
                 ) : apps.length === 0 ? (
-                    <Text style={{ color: Colors[theme ?? "light"].text }}>Loading...</Text>
+                    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 32 }}>
+                        <PaperText
+                            variant="headlineSmall"
+                            style={{
+                                color: paperTheme.colors.onSurface,
+                                textAlign: "center",
+                                marginBottom: 8,
+                            }}
+                        >
+                            No Apps Found
+                        </PaperText>
+                        <PaperText
+                            variant="bodyMedium"
+                            style={{
+                                color: paperTheme.colors.onSurfaceVariant,
+                                textAlign: "center",
+                            }}
+                        >
+                            Pull down to refresh or check permissions
+                        </PaperText>
+                    </View>
                 ) : filteredApps.length === 0 ? (
-                    <Text style={{ color: Colors[theme ?? "light"].text }}>No results for {`"${search}"`}</Text>
+                    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 32 }}>
+                        <PaperText
+                            variant="headlineSmall"
+                            style={{
+                                color: paperTheme.colors.onSurface,
+                                textAlign: "center",
+                                marginBottom: 8,
+                            }}
+                        >
+                            No Results
+                        </PaperText>
+                        <PaperText
+                            variant="bodyMedium"
+                            style={{
+                                color: paperTheme.colors.onSurfaceVariant,
+                                textAlign: "center",
+                            }}
+                        >
+                            No apps match "{search}"
+                        </PaperText>
+                    </View>
                 ) : (
-                    <View style={{ flex: 1, paddingBottom: selectedApps.length > 0 ? 120 : 0, paddingHorizontal: 16 }}>
+                    <View style={{ flex: 1, paddingBottom: selectedApps.length > 0 ? 140 : 16, paddingHorizontal: 0 }}>
                         <FlatList
                             ref={(r) => {
                                 listRef.current = r;
@@ -625,21 +690,28 @@ export default function AppsScreen() {
                             renderItem={renderItem}
                             keyExtractor={(item) => item.packageName}
                             getItemLayout={(data, index) => ({
-                                length: 60,
-                                offset: 60 * index,
+                                length: 72, // Reduced from 60 to make more compact
+                                offset: 72 * index,
                                 index,
                             })}
-                            initialNumToRender={20}
-                            windowSize={11}
+                            initialNumToRender={25}
+                            windowSize={15}
                             removeClippedSubviews={true}
-                            maxToRenderPerBatch={20}
+                            maxToRenderPerBatch={25}
+                            contentContainerStyle={{ paddingBottom: 16 }}
                         />
                     </View>
                 )}
 
                 {/* Scroll to top button */}
                 {showScrollTop ? (
-                    <TouchableOpacity
+                    <FAB
+                        icon="arrow-up"
+                        style={{
+                            position: "absolute",
+                            right: 16,
+                            bottom: selectedApps.length > 0 ? 140 : 16,
+                        }}
                         onPress={() => {
                             try {
                                 listRef.current?.scrollToOffset({ offset: 0, animated: true });
@@ -647,84 +719,78 @@ export default function AppsScreen() {
                                 console.warn(e);
                             }
                         }}
-                        style={{
-                            position: "absolute",
-                            right: 16,
-                            bottom: 16,
-                            backgroundColor: "#ffffffbc",
-                            borderRadius: 8,
-                            opacity: 0.85,
-                            width: 42,
-                            height: 42,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-
-                            shadowColor: "#ddd",
-                            shadowOffset: {
-                                width: 0,
-                                height: 1,
-                            },
-                            shadowOpacity: 0.2,
-                            shadowRadius: 1.41,
-                            elevation: 1,
-                        }}
-                    >
-                        <Ionicons name={"arrow-up"} color="#000" size={20} />
-                    </TouchableOpacity>
+                        size="small"
+                    />
                 ) : null}
 
                 {selectedApps.length > 0 && (
-                    <View style={[styles.selectionActions, { backgroundColor: Colors[theme ?? "light"].background }]}>
-                        <Text style={[styles.selectionText, { color: Colors[theme ?? "light"].text }]}>
+                    <Surface
+                        style={{
+                            position: "absolute",
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            backgroundColor: paperTheme.colors.surface,
+                            padding: 16,
+                            borderTopWidth: 1,
+                            borderTopColor: paperTheme.colors.outline,
+                            elevation: 4,
+                        }}
+                        elevation={4}
+                    >
+                        <PaperText
+                            variant="titleMedium"
+                            style={{
+                                color: paperTheme.colors.onSurface,
+                                textAlign: "center",
+                                marginBottom: 12,
+                            }}
+                        >
                             {selectedApps.length} selected
-                        </Text>
-                        <View style={styles.actionButtons}>
-                            <TouchableOpacity
+                        </PaperText>
+                        <View style={{ flexDirection: "row", justifyContent: "space-around", gap: 8 }}>
+                            <Button
+                                mode="outlined"
                                 onPress={toggleSelectAll}
-                                style={[styles.actionButton, { backgroundColor: Colors[theme ?? "light"].background }]}
+                                icon={allSelected ? "checkbox-marked" : "checkbox-blank-outline"}
+                                style={{ flex: 1 }}
                             >
-                                <Ionicons
-                                    name={allSelected ? "checkbox" : "square-outline"}
-                                    size={20}
-                                    color={allSelected ? Colors[theme ?? "light"].tint : Colors[theme ?? "light"].icon}
-                                />
-                                <Text style={[styles.actionButtonText, { color: Colors[theme ?? "light"].text }]}>
-                                    {allSelected ? "Deselect All" : "Select All"}
-                                </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
+                                {allSelected ? "Deselect All" : "Select All"}
+                            </Button>
+                            <Button
+                                mode="outlined"
                                 onPress={async () => {
                                     runBatchAction(
                                         selectedApps,
                                         AppManagerWrapper.disablePackage,
                                         "Đã vô hiệu hoá tất cả package đã chọn.",
-                                        "không thể vô hiệu hoá."
+                                        "không thể vô hiệu hoá.",
                                     );
                                 }}
-                                style={[styles.actionButton, { backgroundColor: Colors[theme ?? "light"].background }]}
+                                icon="cancel"
+                                style={{ flex: 1 }}
                             >
-                                <Ionicons name="ban-outline" size={20} color="grey" />
-                                <Text style={[styles.actionButtonText, { color: Colors[theme ?? "light"].text }]}>
-                                    Disable
-                                </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
+                                Disable
+                            </Button>
+                            <Button
+                                mode="contained"
                                 onPress={() =>
                                     runBatchAction(
                                         selectedApps,
                                         AppManagerWrapper.uninstallPackage,
                                         "Đã gỡ cài đặt tất cả package đã chọn.",
-                                        "không thể gỡ cài đặt."
+                                        "không thể gỡ cài đặt.",
                                     )
                                 }
-                                style={[styles.actionButton, { backgroundColor: "#ffebee" }]}
+                                icon="delete"
+                                buttonColor={paperTheme.colors.error}
+                                textColor={paperTheme.colors.onError}
+                                style={{ flex: 1 }}
                             >
-                                <Ionicons name="trash" size={20} color="red" />
-                                <Text style={[styles.actionButtonText, { color: "red" }]}>Delete</Text>
-                            </TouchableOpacity>
+                                Delete
+                            </Button>
                         </View>
-                    </View>
+                    </Surface>
                 )}
 
                 <BottomSheet
@@ -750,7 +816,7 @@ export default function AppsScreen() {
                                 pressBehavior="close"
                             />
                         ),
-                        []
+                        [],
                     )}
                 >
                     <BottomSheetView style={styles.contentContainer}>
@@ -952,7 +1018,7 @@ export default function AppsScreen() {
                     </BottomSheetView>
                 </BottomSheet>
             </LayoutScreen>
-        </GestureHandlerRootView>
+        </SafeAreaView>
     );
 }
 

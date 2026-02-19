@@ -1,8 +1,8 @@
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import Ionicons from "@expo/vector-icons/Ionicons";
-import React, { useCallback, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useCallback } from "react";
+import { Image, View } from "react-native";
+import { Card, Checkbox, Text as PaperText, useTheme } from "react-native-paper";
 
 type Props = {
     item: any;
@@ -15,7 +15,7 @@ function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress }: 
     const scheme = useColorScheme() ?? "light";
     const colors = Colors[scheme];
     const isSelected = selectedApps.some((i: any) => i.packageName === item.packageName);
-    const [isPressed, setIsPressed] = useState(false);
+    const paperTheme = useTheme();
 
     const handleCheckboxPress = useCallback(() => {
         if (isSelected) {
@@ -30,89 +30,83 @@ function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress }: 
     }, [onLongPress, item]);
 
     return (
-        <Pressable
-            style={[
-                styles.pressable,
-                isSelected ? { backgroundColor: scheme === "dark" ? "#0a2c3a" : "#e3f2fd" } : undefined,
-                isPressed ? { backgroundColor: scheme === "dark" ? "#1f1f1f" : "#f5f5f5" } : undefined,
-            ]}
+        <Card
+            style={{
+                marginHorizontal: 12,
+                marginVertical: 2,
+                backgroundColor: isSelected ? paperTheme.colors.secondaryContainer : paperTheme.colors.surface,
+                borderRadius: 12,
+            }}
             onLongPress={handleLongPress}
-            onPressIn={() => setIsPressed(true)}
-            onPressOut={() => setIsPressed(false)}
+            mode="elevated"
+            elevation={isSelected ? 2 : 0}
         >
-            <View style={styles.row}>
+            <Card.Content
+                style={{ flexDirection: "row", alignItems: "center", paddingVertical: 8, paddingHorizontal: 12 }}
+            >
                 {item.iconBase64 ? (
                     <Image
                         source={{ uri: `data:image/png;base64,${item.iconBase64}` }}
-                        style={styles.icon}
+                        style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: 8,
+                            marginRight: 12,
+                        }}
                         resizeMode="cover"
                     />
                 ) : (
-                    <View style={[styles.icon, { backgroundColor: scheme === "dark" ? "#333" : "#ccc" }]} />
-                )}
-                <View style={styles.textContainer}>
-                    <Text style={[styles.name, { color: colors.text }]}>{item.appName}</Text>
-                    <Text style={[styles.pkg, { color: colors.icon }]}>{item.packageName}</Text>
-                    {!item.enabled && <Text style={[styles.disabledTag, { color: "orangered" }]}>disabled</Text>}
-                </View>
-                <TouchableOpacity onPress={handleCheckboxPress} style={styles.checkbox}>
-                    <Ionicons
-                        name={isSelected ? "checkbox" : "square-outline"}
-                        size={24}
-                        color={isSelected ? colors.tint : colors.icon}
+                    <View
+                        style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: 8,
+                            marginRight: 12,
+                            backgroundColor: paperTheme.colors.surfaceVariant,
+                        }}
                     />
-                </TouchableOpacity>
-            </View>
-        </Pressable>
+                )}
+                <View style={{ flex: 1 }}>
+                    <PaperText
+                        variant="titleSmall"
+                        style={{
+                            color: paperTheme.colors.onSurface,
+                            fontWeight: "500",
+                        }}
+                        numberOfLines={1}
+                    >
+                        {item.appName}
+                    </PaperText>
+                    <PaperText
+                        variant="bodySmall"
+                        style={{
+                            color: paperTheme.colors.onSurfaceVariant,
+                            marginTop: 2,
+                        }}
+                        numberOfLines={1}
+                    >
+                        {item.packageName}
+                    </PaperText>
+                    {!item.enabled && (
+                        <PaperText
+                            variant="labelSmall"
+                            style={{
+                                color: paperTheme.colors.error,
+                                marginTop: 2,
+                            }}
+                        >
+                            Disabled
+                        </PaperText>
+                    )}
+                </View>
+                <Checkbox
+                    status={isSelected ? "checked" : "unchecked"}
+                    onPress={handleCheckboxPress}
+                    color={paperTheme.colors.primary}
+                />
+            </Card.Content>
+        </Card>
     );
 }
 
 export default React.memo(AppItemComponent);
-
-const styles = StyleSheet.create({
-    item: {
-        flexDirection: "row",
-        alignItems: "center",
-        padding: 10,
-    },
-    pressable: {
-        backgroundColor: "transparent",
-    },
-    row: {
-        flexDirection: "row",
-        alignItems: "center",
-        padding: 10,
-    },
-    icon: {
-        width: 40,
-        height: 40,
-        marginRight: 10,
-        borderRadius: 8,
-    },
-    placeholderIcon: {
-        backgroundColor: "#ccc",
-    },
-    selected: {
-        backgroundColor: "#e3f2fd",
-    },
-    pressed: {
-        backgroundColor: "#f5f5f5",
-    },
-    name: {
-        fontSize: 14,
-        fontWeight: "600",
-    },
-    pkg: {
-        fontSize: 12,
-        color: "#666",
-    },
-    disabledTag: {
-        color: "orangered",
-    },
-    textContainer: {
-        flex: 1,
-    },
-    checkbox: {
-        padding: 5,
-    },
-});
