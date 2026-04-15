@@ -1,50 +1,143 @@
-# Welcome to your Expo app 👋
+<div align="center">
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+# skibidi-apps
 
-## Get started
+**Quản lý ứng dụng Android cấp độ hệ thống — Hỗ trợ cả root và no-root (Shizuku).**
 
-1. Install dependencies
+![Platform](https://img.shields.io/badge/platform-Android-3DDC84?style=flat-square&logo=android)
+![Built with Expo](https://img.shields.io/badge/built%20with-Expo-000020?style=flat-square&logo=expo)
+![React Native](https://img.shields.io/badge/React%20Native-0.81-61DAFB?style=flat-square&logo=react)
+![License](https://img.shields.io/badge/license-Private-red?style=flat-square)
 
-   ```bash
-   npm install
-   ```
+</div>
 
-2. Start the app
+---
 
-   ```bash
-   npx expo start
-   ```
+## Giới thiệu
 
-In the output, you'll find options to open the app in a
+\*_Skibidi Apps_ là một app Android mạnh tay, cho phép bạn xem, bật/tắt, gỡ bỏ hoặc force-stop bất kỳ ứng dụng nào trên thiết bị — kể cả app hệ thống mà Google không muốn bạn đụng vào.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+Hai chế độ hoạt động:
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+| Chế độ      | Yêu cầu                                 | Mức quyền                  |
+| ----------- | --------------------------------------- | -------------------------- |
+| **Shizuku** | ADB qua Wi-Fi hoặc ADB có dây (một lần) | ADB-level — không cần root |
+| **Root**    | Thiết bị đã root                        | Toàn quyền hệ thống        |
 
-## Get a fresh project
+Ngoài ra còn có **Widget** để ghim app yêu thích lên màn hình chính với các hành động nhanh (quick force stop, quick disable, quick enable, quick uninstall).
 
-When you're ready, run:
+---
+
+## Tính năng
+
+- Liệt kê toàn bộ app đang cài — user app lẫn system app
+- Bật / tắt app không cần gỡ cài đặt
+- Force-stop tiến trình đang chạy
+- Gỡ cài đặt (uninstall) hoàn toàn
+- Tìm kiếm app theo tên hoặc package name
+- Mở trang Play Store của bất kỳ app nào
+- Quản lý danh sách Widget — thêm / xóa app khỏi widget
+- Hỗ trợ Dark Mode / Light Mode tự động theo hệ thống
+- Haptic feedback cho từng thao tác
+
+---
+
+## Yêu cầu
+
+- **Android 10+** (API 29 trở lên)
+- **Shizuku** (khuyên dùng) — tải trên [Play Store](https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api) hoặc [GitHub](https://github.com/RikkaApps/Shizuku)
+- Hoặc thiết bị **đã root** (Magisk / KernelSU / APatch / ....)
+
+---
+
+## Cài đặt & Chạy (Development)
+
+### 1. Clone và cài dependencies
 
 ```bash
-npm run reset-project
+git clone <repo-url>
+cd skibidi-apps
+yarn install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### 2. Kết nối thiết bị Android
 
-## Learn more
+```bash
+# Kiểm tra thiết bị đã nhận chưa
+adb devices
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+Bật **USB Debugging** trên thiết bị: _Cài đặt > Giới thiệu điện thoại > Nhấn 7 lần vào "Số bản dựng" > Tuỳ chọn nhà phát triển > USB Debugging_
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+### 3. Build và chạy trên Android
 
-## Join the community
+```bash
+yarn android
+```
 
-Join our community of developers creating universal apps.
+Lần đầu build sẽ lâu hơn vì phải compile native modules. Từ lần sau thì nhanh hơn nhiều.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+### 4. Khởi động Shizuku (nếu không dùng root)
+
+Trên thiết bị, mở app **Shizuku** và chọn **"Bắt đầu qua ADB"**, sau đó chạy lệnh sau trên máy tính:
+
+```bash
+adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh
+```
+
+> Chỉ cần chạy một lần. Sau khi khởi động lại máy thì cần chạy lại lệnh này.
+
+---
+
+## Cấu trúc project
+
+```
+skibidi-apps/
+├── app/                    # Expo Router — file-based routing
+│   ├── (tabs)/
+│   │   ├── index.tsx       # Màn hình chính — danh sách app
+│   │   └── widget-list.tsx # Quản lý widget
+│   ├── modal.tsx           # Modal thêm app vào widget
+│   └── _layout.tsx         # Root layout
+├── components/             # UI components dùng chung
+├── hooks/                  # Custom hooks (theme, v.v.)
+├── utils/
+│   └── appManager.ts       # Wrapper cho Shizuku & Root native modules
+├── android/                # Native Android code (AIDL, modules)
+└── assets/                 # Icon, hình ảnh
+```
+
+---
+
+## Build APK release
+
+```bash
+# Build APK local (không cần EAS)
+yarn android --variant release
+
+# Hoặc dùng EAS Build (cloud)
+eas build --platform android --profile production
+```
+
+APK được ký bằng `skibidiapps-release-key.keystore` — giữ file này cẩn thận, mất là gg.
+
+---
+
+## Troubleshooting
+
+**App báo "Shizuku không khả dụng"**
+→ Mở app Shizuku và khởi động lại service. Chạy lại lệnh ADB ở trên.
+
+**Không tắt/gỡ được app**
+→ Một số app hệ thống được bảo vệ ở cấp firmware. Với những app này cần root hoặc device policy mới can thiệp được.
+
+**Build lỗi native module**
+→ Thử `cd android && ./gradlew clean`, sau đó build lại.
+
+---
+
+<div align="center">
+
+Made with frustration and caffeine by **mwarevn**
+
+</div>
