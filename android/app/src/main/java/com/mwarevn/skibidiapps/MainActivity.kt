@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops
+package com.mwarevn.skibidiapps
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

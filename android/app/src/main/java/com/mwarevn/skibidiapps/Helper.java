@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops;
+package com.mwarevn.skibidiapps;
 
 import android.content.ComponentName;
 import android.content.ServiceConnection;
@@ -8,7 +8,7 @@ import android.util.Log;
 
 import com.facebook.react.BuildConfig;
 import com.facebook.react.bridge.ReactApplicationContext;
-import com.mwarevn.skibiops.react.services.AppManagerUserService;
+import com.mwarevn.skibidiapps.react.services.AppManagerUserService;
 
 import rikka.shizuku.Shizuku;
 

@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops.widget;
+package com.mwarevn.skibidiapps.widget;
 
 import static com.facebook.react.modules.dialog.DialogModule.ACTION_BUTTON_CLICKED;
 
@@ -17,9 +17,9 @@ import android.util.Log;
 import android.widget.RemoteViews;
 import android.widget.Toast;
 
-import com.mwarevn.skibiops.IAppManagerService;
-import com.mwarevn.skibiops.R;
-import com.mwarevn.skibiops.react.modules.ServiceHolder;
+import com.mwarevn.skibidiapps.IAppManagerService;
+import com.mwarevn.skibidiapps.R;
+import com.mwarevn.skibidiapps.react.modules.ServiceHolder;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -29,7 +29,7 @@ import org.json.JSONObject;
  */
 public class Widget extends AppWidgetProvider {
 
-    public static final String EXTRA_PACKAGE_NAME = "com.mwarevn.skibiops.widget";
+    public static final String EXTRA_PACKAGE_NAME = "com.mwarevn.skibidiapps.widget";
     public static final String ACTION_FORCE_STOP = "force_stop";
     public static final String ACTION_TOGGLE_ENABLE = "toggle_state";
 

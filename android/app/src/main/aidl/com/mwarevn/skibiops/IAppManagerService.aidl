@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops;
+package com.mwarevn.skibidiapps;
 
 interface IAppManagerService {
     void uninstallPackage(String packageName);

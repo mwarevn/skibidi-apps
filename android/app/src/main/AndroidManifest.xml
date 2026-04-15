@@ -93,8 +93,8 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
 
-                <data android:scheme="skibiops" />
-                <data android:scheme="exp+skibi-ops" />
+                <data android:scheme="skibidiapps" />
+                <data android:scheme="exp+skibidi-apps" />
             </intent-filter>
         </activity>
     </application>

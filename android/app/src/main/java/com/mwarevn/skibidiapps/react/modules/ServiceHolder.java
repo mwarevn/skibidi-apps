@@ -1,6 +1,6 @@
-package com.mwarevn.skibiops.react.modules;
+package com.mwarevn.skibidiapps.react.modules;
 
-import com.mwarevn.skibiops.IAppManagerService;
+import com.mwarevn.skibidiapps.IAppManagerService;
 
 public class ServiceHolder {
     private static volatile IAppManagerService serviceApi;

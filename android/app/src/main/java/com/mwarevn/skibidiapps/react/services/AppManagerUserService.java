@@ -1,7 +1,7 @@
-package com.mwarevn.skibiops.react.services;
+package com.mwarevn.skibidiapps.react.services;
 
 import android.os.RemoteException;
-import com.mwarevn.skibiops.IAppManagerService;
+import com.mwarevn.skibidiapps.IAppManagerService;
 
 import android.util.Log;
 import java.io.BufferedReader;

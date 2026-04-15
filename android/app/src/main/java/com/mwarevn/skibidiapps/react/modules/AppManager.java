@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops.react.modules;
+package com.mwarevn.skibidiapps.react.modules;
 
 import android.appwidget.AppWidgetManager;
 import android.content.BroadcastReceiver;
@@ -13,9 +13,9 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.WritableMap;
-import com.mwarevn.skibiops.IAppManagerService;
-import com.mwarevn.skibiops.R;
-import com.mwarevn.skibiops.widget.Widget;
+import com.mwarevn.skibidiapps.IAppManagerService;
+import com.mwarevn.skibidiapps.R;
+import com.mwarevn.skibidiapps.widget.Widget;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;

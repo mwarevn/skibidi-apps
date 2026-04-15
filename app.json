@@ -1,11 +1,11 @@
 {
     "expo": {
-        "name": "skibi-ops",
-        "slug": "skibi-ops",
+        "name": "skibidi-apps",
+        "slug": "skibidi-apps",
         "version": "1.0.0",
         "orientation": "portrait",
         "icon": "./assets/images/icon.png",
-        "scheme": "skibi-ops",
+        "scheme": "skibidi-apps",
         "userInterfaceStyle": "automatic",
         "newArchEnabled": true,
         "android": {
@@ -17,7 +17,7 @@
             },
             "edgeToEdgeEnabled": true,
             "predictiveBackGestureEnabled": false,
-            "package": "com.mwarevn.skibiops"
+            "package": "com.mwarevn.skibidiapps"
         },
         "plugins": ["expo-router"],
         "experiments": {

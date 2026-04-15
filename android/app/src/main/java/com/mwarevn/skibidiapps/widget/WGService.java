@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops.widget;
+package com.mwarevn.skibidiapps.widget;
 
 import android.content.Intent;
 import android.widget.RemoteViewsService;

@@ -1,4 +1,4 @@
-package com.mwarevn.skibiops.react.modules;
+package com.mwarevn.skibidiapps.react.modules;
 
 import android.util.Log;
 
