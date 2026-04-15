@@ -163,6 +163,9 @@ export const AppManagerWrapper = {
     forceStopPackage: (pkg: string, rootMode: boolean) =>
         rootMode ? callRoot("forceStopPackage", pkg) : callShizuku("forceStopPackage", pkg),
 
+    clearData:        (pkg: string, rootMode: boolean) =>
+        rootMode ? callRoot("clearData", pkg) : callShizuku("clearData", pkg),
+
     uninstallPackage: (pkg: string, rootMode: boolean) =>
         rootMode ? AppManagerWrapper.root.uninstallPackage(pkg) : callShizuku("uninstallPackage", pkg),
 

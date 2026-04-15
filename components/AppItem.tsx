@@ -9,9 +9,11 @@ type Props = {
     selectedApps: any[];
     onLongPress?: (item: any) => void;
     isPending?: boolean;
+    isBloatware?: boolean;
+    isProtected?: boolean;
 };
 
-function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress, isPending = false }: Props) {
+function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress, isPending = false, isBloatware = false, isProtected = false }: Props) {
     const theme = useTheme();
     const isSelected = selectedApps.some((i: any) => i.packageName === item.packageName);
     const [isPressed, setIsPressed] = useState(false);
@@ -69,16 +71,28 @@ function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress, is
                     <Text style={[styles.pkg, { color: theme.scale[8] }]} numberOfLines={1}>
                         {item.packageName}
                     </Text>
-                    {!item.enabled && !isPending && (
-                        <Text style={[styles.disabledTag, { color: theme.semantic.error }]}>
-                            disabled
-                        </Text>
-                    )}
-                    {isPending && (
-                        <Text style={[styles.disabledTag, { color: theme.scale[8] }]}>
-                            đang xử lý...
-                        </Text>
-                    )}
+                    <View style={styles.tags}>
+                        {!item.enabled && !isPending && (
+                            <Text style={[styles.tag, { color: theme.semantic.error, backgroundColor: theme.semantic.error + "22" }]}>
+                                disabled
+                            </Text>
+                        )}
+                        {isBloatware && (
+                            <Text style={[styles.tag, { color: theme.semantic.warning, backgroundColor: theme.semantic.warning + "22" }]}>
+                                bloatware
+                            </Text>
+                        )}
+                        {isProtected && (
+                            <Text style={[styles.tag, { color: theme.semantic.success, backgroundColor: theme.semantic.success + "22" }]}>
+                                protected
+                            </Text>
+                        )}
+                        {isPending && (
+                            <Text style={[styles.tag, { color: theme.scale[8], backgroundColor: theme.scale[4] }]}>
+                                đang xử lý...
+                            </Text>
+                        )}
+                    </View>
                 </View>
 
                 {/* Checkbox */}
@@ -137,10 +151,18 @@ const styles = StyleSheet.create({
         fontSize: 12,
         marginTop: 1,
     },
-    disabledTag: {
-        fontSize: 11,
-        fontWeight: "500",
-        marginTop: 2,
+    tags: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 4,
+        marginTop: 3,
+    },
+    tag: {
+        fontSize: 10,
+        fontWeight: "600",
+        borderRadius: 999,
+        paddingHorizontal: 5,
+        paddingVertical: 1,
     },
     checkbox: {
         padding: 4,

@@ -2,7 +2,9 @@ import AppItem from "@/components/AppItem";
 import LayoutScreen from "@/components/ui/LayoutScreen";
 import { useTheme } from "@/hooks/use-theme-color";
 import AppManagerWrapper from "@/utils/appManager";
+import { isBloatware } from "@/utils/bloatware";
 import { openPlayStore } from "@/utils/common";
+import { logHistory } from "@/utils/history";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import BottomSheet, {
     BottomSheetBackdrop,
@@ -16,7 +18,10 @@ import {
     AppState,
     FlatList,
     Image,
+    Modal,
     NativeModules,
+    ScrollView,
+    Share,
     StyleSheet,
     Text,
     TextInput,
@@ -84,6 +89,22 @@ export default function AppsScreen() {
     const [shizukuHasPermission, setShizukuHasPermission] = useState(false);
 
     const [rootMode, setRootMode] = useState(false);
+
+    // ─── Sort ──────────────────────────────────────────────────────────────────
+    type SortKey = "name_asc" | "name_desc" | "install_new" | "install_old" | "system_first" | "disabled_first";
+    const [sortBy, setSortBy] = useState<SortKey>("name_asc");
+    const [showSortPicker, setShowSortPicker] = useState(false);
+
+    // ─── Protected list ────────────────────────────────────────────────────────
+    const [protectedPkgs, setProtectedPkgs] = useState<Set<string>>(new Set());
+
+    // ─── Permission viewer ─────────────────────────────────────────────────────
+    const [permModal, setPermModal] = useState(false);
+    const [permData, setPermData] = useState<{ name: string; granted: boolean; dangerous: boolean }[]>([]);
+    const [permApp, setPermApp] = useState<string>("");
+
+    // ─── Extract APK ───────────────────────────────────────────────────────────
+    const [extractingPkg, setExtractingPkg] = useState<string | null>(null);
 
     const bottomSheetRef = useRef<BottomSheet>(null);
     const listRef = useRef<FlatList<any> | null>(null);
@@ -161,21 +182,37 @@ export default function AppsScreen() {
     }, []);
 
     // ─── Single-app actions (từ BottomSheet) ──────────────────────────────────
+    const guardProtected = useCallback((pkg: string, appName: string, action: string, onConfirm: () => void) => {
+        if (!protectedPkgs.has(pkg)) { onConfirm(); return; }
+        Alert.alert(
+            "App được bảo vệ",
+            `"${appName}" đang được bảo vệ. Vẫn muốn ${action}?`,
+            [
+                { text: "Hủy", style: "cancel" },
+                { text: "Tiếp tục", style: "destructive", onPress: onConfirm },
+            ]
+        );
+    }, [protectedPkgs]);
+
     const doDisable = useCallback(async (app: any) => {
-        const pkg = app.packageName;
-        addPending([pkg]);
-        closeSheet();
-        try {
-            await AppManagerWrapper.disablePackage(pkg, rootMode);
-            patchApp(pkg, { enabled: false });
-            await patchWidgetEntry(pkg, { enabled: false });
-            Toast.show({ type: "success", text1: "Hoàn tất", text2: `Đã vô hiệu hoá ${app.appName}` });
-        } catch {
-            Toast.show({ type: "error", text1: "Lỗi", text2: `Không thể vô hiệu hoá ${app.appName}` });
-        } finally {
-            removePending([pkg]);
-        }
-    }, [addPending, removePending, patchApp, rootMode]);
+        guardProtected(app.packageName, app.appName, "vô hiệu hoá", async () => {
+            const pkg = app.packageName;
+            addPending([pkg]);
+            closeSheet();
+            try {
+                await AppManagerWrapper.disablePackage(pkg, rootMode);
+                patchApp(pkg, { enabled: false });
+                await patchWidgetEntry(pkg, { enabled: false });
+                logHistory("disable", pkg, app.appName, true);
+                Toast.show({ type: "success", text1: "Hoàn tất", text2: `Đã vô hiệu hoá ${app.appName}` });
+            } catch (e: any) {
+                logHistory("disable", pkg, app.appName, false, e?.message);
+                Toast.show({ type: "error", text1: "Lỗi", text2: `Không thể vô hiệu hoá ${app.appName}` });
+            } finally {
+                removePending([pkg]);
+            }
+        });
+    }, [addPending, removePending, patchApp, rootMode, guardProtected]);
 
     const doEnable = useCallback(async (app: any) => {
         const pkg = app.packageName;
@@ -185,8 +222,10 @@ export default function AppsScreen() {
             await AppManagerWrapper.enablePackage(pkg, rootMode);
             patchApp(pkg, { enabled: true });
             await patchWidgetEntry(pkg, { enabled: true });
+            logHistory("enable", pkg, app.appName, true);
             Toast.show({ type: "success", text1: "Hoàn tất", text2: `Đã bật lại ${app.appName}` });
-        } catch {
+        } catch (e: any) {
+            logHistory("enable", pkg, app.appName, false, e?.message);
             Toast.show({ type: "error", text1: "Lỗi", text2: `Không thể bật ${app.appName}` });
         } finally {
             removePending([pkg]);
@@ -199,8 +238,10 @@ export default function AppsScreen() {
         closeSheet();
         try {
             await AppManagerWrapper.forceStopPackage(pkg, rootMode);
+            logHistory("force_stop", pkg, app.appName, true);
             Toast.show({ type: "success", text1: "Hoàn tất", text2: `Đã dừng ${app.appName}` });
-        } catch {
+        } catch (e: any) {
+            logHistory("force_stop", pkg, app.appName, false, e?.message);
             Toast.show({ type: "error", text1: "Lỗi", text2: `Không thể dừng ${app.appName}` });
         } finally {
             removePending([pkg]);
@@ -232,43 +273,98 @@ export default function AppsScreen() {
                 ? await AppManagerWrapper.root.forceUninstallPackage(pkg)
                 : await AppManagerWrapper.shizuku.forceUninstallPackage(pkg);
             if (!result.success) {
+                logHistory("force_uninstall", pkg, app.appName, false, result.error);
                 Toast.show({ type: "error", text1: "Không thể gỡ hoàn toàn", text2: result.error });
                 return;
             }
+            logHistory("force_uninstall", pkg, app.appName, true);
             removeApp(pkg);
             Toast.show({ type: "success", text1: "Đã gỡ hoàn toàn", text2: app.appName });
-        } catch {
+        } catch (e: any) {
+            logHistory("force_uninstall", pkg, app.appName, false, e?.message);
             Toast.show({ type: "error", text1: "Lỗi", text2: `Force uninstall thất bại với ${app.appName}` });
         } finally {
             removePending([pkg]);
         }
     }, [addPending, removePending, removeApp, rootMode]);
 
+    const doOpenAppInfo = useCallback((app: any) => {
+        closeSheet();
+        SystemModule.openAppInfo(app.packageName).catch(() =>
+            Toast.show({ type: "error", text1: "Không mở được Settings" })
+        );
+    }, []);
+
+    const doLaunchApp = useCallback((app: any) => {
+        closeSheet();
+        SystemModule.launchApp(app.packageName).catch(() =>
+            Toast.show({ type: "error", text1: "Không khởi động được app" })
+        );
+    }, []);
+
+    const doExtractApk = useCallback(async (app: any) => {
+        const pkg = app.packageName;
+        if (extractingPkg) return;
+        closeSheet();
+        setExtractingPkg(pkg);
+        try {
+            const destPath: string = await SystemModule.extractApk(pkg);
+            logHistory("extract_apk", pkg, app.appName, true, destPath);
+            Toast.show({
+                type: "success",
+                text1: "Trích xuất thành công",
+                text2: destPath,
+                onPress: async () => {
+                    try { await Share.share({ url: "file://" + destPath, message: destPath }); } catch {}
+                },
+            });
+        } catch (e: any) {
+            logHistory("extract_apk", pkg, app.appName, false, e?.message);
+            Toast.show({ type: "error", text1: "Trích xuất thất bại", text2: e?.message });
+        } finally {
+            setExtractingPkg(null);
+        }
+    }, [extractingPkg]);
+
+    const doViewPermissions = useCallback(async (app: any) => {
+        closeSheet();
+        try {
+            const perms: { name: string; granted: boolean; dangerous: boolean }[] =
+                await SystemModule.getAppPermissions(app.packageName);
+            setPermData(perms);
+            setPermApp(app.appName);
+            setPermModal(true);
+        } catch {
+            Toast.show({ type: "error", text1: "Không thể lấy danh sách quyền" });
+        }
+    }, []);
+
     const doUninstall = useCallback(async (app: any) => {
         const pkg = app.packageName;
 
-        // Root mode: hiển thị dialog lựa chọn
-        if (rootMode) {
-            closeSheet();
-            Alert.alert(
-                "Gỡ cài đặt (Root)",
-                `Chọn phương thức gỡ cho "${app.appName}":`,
-                [
-                    { text: "Huỷ", style: "cancel" },
-                    {
-                        text: "Disable",
-                        style: "default",
-                        onPress: () => doDisableFromUninstall(app),
-                    },
-                    {
-                        text: "Force Uninstall",
-                        style: "destructive",
-                        onPress: () => doForceUninstall(app),
-                    },
-                ]
-            );
-            return;
-        }
+        const proceed = () => {
+            // Root mode: hiển thị dialog lựa chọn
+            if (rootMode) {
+                closeSheet();
+                Alert.alert(
+                    "Gỡ cài đặt (Root)",
+                    `Chọn phương thức gỡ cho "${app.appName}":`,
+                    [
+                        { text: "Huỷ", style: "cancel" },
+                        {
+                            text: "Disable",
+                            style: "default",
+                            onPress: () => doDisableFromUninstall(app),
+                        },
+                        {
+                            text: "Force Uninstall",
+                            style: "destructive",
+                            onPress: () => doForceUninstall(app),
+                        },
+                    ]
+                );
+                return;
+            }
 
         // Shizuku mode: cũng hiển thị dialog lựa chọn
         closeSheet();
@@ -289,7 +385,10 @@ export default function AppsScreen() {
                 },
             ]
         );
-    }, [addPending, removePending, removeApp, patchApp, rootMode, doDisableFromUninstall, doForceUninstall]);
+        }; // end proceed
+
+        guardProtected(pkg, app.appName, "gỡ", proceed);
+    }, [addPending, removePending, removeApp, patchApp, rootMode, doDisableFromUninstall, doForceUninstall, guardProtected]);
 
     // ─── Batch actions ────────────────────────────────────────────────────────
     /**
@@ -514,10 +613,38 @@ export default function AppsScreen() {
         }
     }, []);
 
+    // ─── Protected list helpers ────────────────────────────────────────────────
+    const loadProtectedList = useCallback(async () => {
+        try {
+            const raw = await SystemModule.getProtectedList();
+            const arr: string[] = raw && raw !== "[]" ? JSON.parse(raw) : [];
+            setProtectedPkgs(new Set(arr));
+        } catch { /* ignore */ }
+    }, []);
+
+    const saveProtectedList = useCallback(async (set: Set<string>) => {
+        setProtectedPkgs(set);
+        await SystemModule.setProtectedList(JSON.stringify([...set]));
+    }, []);
+
+    const toggleProtected = useCallback(async (pkg: string, appName: string) => {
+        const next = new Set(protectedPkgs);
+        const wasProtected = next.has(pkg);
+        if (wasProtected) next.delete(pkg); else next.add(pkg);
+        await saveProtectedList(next);
+        logHistory(wasProtected ? "unprotect" : "protect", pkg, appName, true);
+        Toast.show({
+            type: "success",
+            text1: wasProtected ? "Đã bỏ bảo vệ" : "Đã bảo vệ",
+            text2: appName,
+        });
+    }, [protectedPkgs, saveProtectedList]);
+
     // ─── Effects ──────────────────────────────────────────────────────────────
     useEffect(() => {
         loadApps(true);
         loadRootMode();
+        loadProtectedList();
     }, []);
 
     useEffect(() => {
@@ -547,8 +674,21 @@ export default function AppsScreen() {
         if (filters.disabled) f = f.filter((a) => !a.enabled);
         if (filters.system)   f = f.filter((a) => a.isSystemApp);
         if (filters.inWidget) f = f.filter((a) => widgetAppsSet.has(a.packageName));
+
+        // Sort
+        f = [...f].sort((a, b) => {
+            switch (sortBy) {
+                case "name_asc":      return (a.appName || "").localeCompare(b.appName || "");
+                case "name_desc":     return (b.appName || "").localeCompare(a.appName || "");
+                case "install_new":   return (b.firstInstallTime || 0) - (a.firstInstallTime || 0);
+                case "install_old":   return (a.firstInstallTime || 0) - (b.firstInstallTime || 0);
+                case "system_first":  return (b.isSystemApp ? 1 : 0) - (a.isSystemApp ? 1 : 0);
+                case "disabled_first":return (a.enabled ? 1 : 0) - (b.enabled ? 1 : 0);
+                default: return 0;
+            }
+        });
         return f;
-    }, [apps, search, filters, widgetAppsSet]);
+    }, [apps, search, filters, widgetAppsSet, sortBy]);
 
     const allSelected = useMemo(() =>
         filteredApps.length > 0 &&
@@ -581,10 +721,22 @@ export default function AppsScreen() {
                 selectedApps={selectedApps}
                 onLongPress={handleOpenSheetForApp}
                 isPending={pendingPkgs.has(item.packageName)}
+                isBloatware={isBloatware(item.packageName)}
+                isProtected={protectedPkgs.has(item.packageName)}
             />
         ),
-        [selectedApps, handleOpenSheetForApp, pendingPkgs]
+        [selectedApps, handleOpenSheetForApp, pendingPkgs, protectedPkgs]
     );
+
+    // Sort labels
+    const SORT_LABELS: Record<SortKey, string> = {
+        name_asc:      "A → Z",
+        name_desc:     "Z → A",
+        install_new:   "Mới cài nhất",
+        install_old:   "Cũ cài nhất",
+        system_first:  "System trước",
+        disabled_first:"Disabled trước",
+    };
 
     // Status bar
     const statusColor =
@@ -608,49 +760,93 @@ export default function AppsScreen() {
                             <Text style={[styles.statusLabel, { color: statusColor }]}>{statusLabel}</Text>
                             <Text style={[styles.brand, { color: theme.scale[7] }]}>mwarevn</Text>
                         </View>
-                        <TouchableOpacity
-                            onPress={toggleRootMode}
-                            style={[styles.rootToggle, {
-                                backgroundColor: rootMode ? theme.semantic.error + "22" : theme.scale[3],
-                            }]}
-                        >
-                            <Ionicons
-                                name={rootMode ? "shield" : "shield-outline"}
-                                size={16}
-                                color={rootMode ? theme.semantic.error : theme.scale[8]}
-                            />
-                            <Text style={[styles.rootToggleText, { color: rootMode ? theme.semantic.error : theme.scale[8] }]}>
-                                {rootMode ? "Root ON" : "Root"}
-                            </Text>
-                        </TouchableOpacity>
+                        <View style={styles.headerBtns}>
+                            <TouchableOpacity
+                                onPress={async () => {
+                                    try {
+                                        const list = apps.map((a) => `${a.appName}\t${a.packageName}\t${a.versionName || ""}\t${a.isSystemApp ? "system" : "user"}\t${a.enabled ? "enabled" : "disabled"}`);
+                                        await Share.share({ message: list.join("\n"), title: "App List Export" });
+                                    } catch { Toast.show({ type: "error", text1: "Export thất bại" }); }
+                                }}
+                                style={[styles.rootToggle, { backgroundColor: theme.scale[3] }]}
+                            >
+                                <Ionicons name="share-outline" size={16} color={theme.scale[8]} />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={toggleRootMode}
+                                style={[styles.rootToggle, {
+                                    backgroundColor: rootMode ? theme.semantic.error + "22" : theme.scale[3],
+                                }]}
+                            >
+                                <Ionicons
+                                    name={rootMode ? "shield" : "shield-outline"}
+                                    size={16}
+                                    color={rootMode ? theme.semantic.error : theme.scale[8]}
+                                />
+                                <Text style={[styles.rootToggleText, { color: rootMode ? theme.semantic.error : theme.scale[8] }]}>
+                                    {rootMode ? "Root ON" : "Root"}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </View>
 
-                {/* ── Search ── */}
+                {/* ── Search + Sort ── */}
                 <View style={styles.searchWrapper}>
-                    <View style={[styles.searchBox, { backgroundColor: theme.scale[3] }]}>
-                        <Ionicons name="search" size={18} color={theme.scale[7]} style={styles.searchIcon} />
-                        <TextInput
-                            value={search}
-                            onChangeText={setSearch}
-                            placeholder="Tìm theo tên hoặc package..."
-                            placeholderTextColor={theme.scale[7]}
-                            style={[styles.searchInput, { color: theme.scale[10] }]}
-                            autoCapitalize="none"
-                            autoCorrect={false}
-                            returnKeyType="search"
-                        />
-                        {search.length > 0 && (
-                            <TouchableOpacity onPress={() => setSearch("")} hitSlop={8}>
-                                <Ionicons name="close-circle" size={18} color={theme.scale[7]} />
-                            </TouchableOpacity>
-                        )}
+                    <View style={styles.searchRow}>
+                        <View style={[styles.searchBox, { backgroundColor: theme.scale[3], flex: 1 }]}>
+                            <Ionicons name="search" size={18} color={theme.scale[7]} style={styles.searchIcon} />
+                            <TextInput
+                                value={search}
+                                onChangeText={setSearch}
+                                placeholder="Tìm theo tên hoặc package..."
+                                placeholderTextColor={theme.scale[7]}
+                                style={[styles.searchInput, { color: theme.scale[10] }]}
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                                returnKeyType="search"
+                            />
+                            {search.length > 0 && (
+                                <TouchableOpacity onPress={() => setSearch("")} hitSlop={8}>
+                                    <Ionicons name="close-circle" size={18} color={theme.scale[7]} />
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                        <TouchableOpacity
+                            onPress={() => setShowSortPicker((v) => !v)}
+                            style={[styles.sortBtn, { backgroundColor: showSortPicker ? theme.scale[4] : theme.scale[3] }]}
+                        >
+                            <Ionicons name="funnel-outline" size={18} color={theme.scale[8]} />
+                        </TouchableOpacity>
                     </View>
                     <Text style={[styles.countLabel, { color: theme.scale[8] }]}>
                         {filteredApps.length} / {apps.length}
                         {pendingPkgs.size > 0 && ` · ${pendingPkgs.size} đang xử lý`}
+                        {` · ${SORT_LABELS[sortBy]}`}
                     </Text>
                 </View>
+
+                {/* ── Sort picker ── */}
+                {showSortPicker && (
+                    <View style={[styles.sortPicker, { backgroundColor: theme.scale[2] }]}>
+                        {(Object.entries(SORT_LABELS) as [SortKey, string][]).map(([key, label]) => (
+                            <TouchableOpacity
+                                key={key}
+                                onPress={() => { setSortBy(key); setShowSortPicker(false); }}
+                                style={[styles.sortOption, { backgroundColor: sortBy === key ? theme.scale[3] : "transparent" }]}
+                            >
+                                <Ionicons
+                                    name={sortBy === key ? "radio-button-on" : "radio-button-off"}
+                                    size={16}
+                                    color={sortBy === key ? theme.scale[11] : theme.scale[7]}
+                                />
+                                <Text style={[styles.sortOptionText, { color: sortBy === key ? theme.scale[11] : theme.scale[8] }]}>
+                                    {label}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                )}
 
                 {/* ── Filters ── */}
                 <View style={styles.filtersRow}>
@@ -755,6 +951,55 @@ export default function AppsScreen() {
                     </View>
                 )}
 
+                {/* ── Permission Modal ── */}
+                <Modal
+                    visible={permModal}
+                    transparent
+                    animationType="slide"
+                    onRequestClose={() => setPermModal(false)}
+                >
+                    <View style={styles.modalOverlay}>
+                        <View style={[styles.modalCard, { backgroundColor: theme.scale[2] }]}>
+                            <View style={styles.modalHeader}>
+                                <Text style={[styles.modalTitle, { color: theme.scale[11] }]}>
+                                    Quyền — {permApp}
+                                </Text>
+                                <TouchableOpacity onPress={() => setPermModal(false)} hitSlop={8}>
+                                    <Ionicons name="close" size={22} color={theme.scale[8]} />
+                                </TouchableOpacity>
+                            </View>
+                            <ScrollView style={styles.permList}>
+                                {permData.length === 0 ? (
+                                    <Text style={[styles.permEmpty, { color: theme.scale[7] }]}>Không có quyền nào</Text>
+                                ) : (
+                                    permData.map((p) => (
+                                        <View key={p.name} style={[styles.permItem, { borderBottomColor: theme.scale[3] }]}>
+                                            <View style={styles.permLeft}>
+                                                <Ionicons
+                                                    name={p.dangerous ? "warning-outline" : "shield-checkmark-outline"}
+                                                    size={14}
+                                                    color={p.dangerous ? theme.semantic.warning : theme.scale[6]}
+                                                />
+                                                <Text style={[styles.permName, { color: theme.scale[9] }]} numberOfLines={2}>
+                                                    {p.name.replace("android.permission.", "").replace("com.android.permission.", "")}
+                                                </Text>
+                                            </View>
+                                            <View style={[
+                                                styles.permBadge,
+                                                { backgroundColor: p.granted ? theme.semantic.success + "33" : theme.scale[3] },
+                                            ]}>
+                                                <Text style={[styles.permBadgeText, { color: p.granted ? theme.semantic.success : theme.scale[7] }]}>
+                                                    {p.granted ? "Granted" : "Denied"}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    ))
+                                )}
+                            </ScrollView>
+                        </View>
+                    </View>
+                </Modal>
+
                 {/* ── Bottom Sheet ── */}
                 <BottomSheet
                     index={-1}
@@ -778,20 +1023,74 @@ export default function AppsScreen() {
                         {selectedApp ? (
                             <View style={styles.sheetInner}>
                                 {/* App icon + info */}
-                                {selectedApp.iconBase64 && (
-                                    <View style={styles.sheetIconRow}>
+                                <View style={styles.sheetIconRow}>
+                                    {selectedApp.iconBase64 ? (
                                         <Image
                                             source={{ uri: `data:image/png;base64,${selectedApp.iconBase64}` }}
                                             style={styles.sheetIcon}
                                         />
-                                    </View>
-                                )}
+                                    ) : (
+                                        <View style={[styles.sheetIcon, { backgroundColor: theme.scale[3] }]} />
+                                    )}
+                                </View>
                                 <Text style={[styles.sheetAppName, { color: theme.scale[11] }]}>
                                     {selectedApp.appName}
                                 </Text>
                                 <Text style={[styles.sheetPkg, { color: theme.scale[8] }]}>
                                     {selectedApp.packageName}
                                 </Text>
+
+                                {/* App meta badges */}
+                                <View style={styles.sheetMeta}>
+                                    {selectedApp.versionName && (
+                                        <View style={[styles.metaBadge, { backgroundColor: theme.scale[3] }]}>
+                                            <Text style={[styles.metaBadgeText, { color: theme.scale[8] }]}>
+                                                v{selectedApp.versionName}
+                                            </Text>
+                                        </View>
+                                    )}
+                                    <View style={[styles.metaBadge, { backgroundColor: selectedApp.isSystemApp ? theme.semantic.warning + "22" : theme.scale[3] }]}>
+                                        <Text style={[styles.metaBadgeText, { color: selectedApp.isSystemApp ? theme.semantic.warning : theme.scale[8] }]}>
+                                            {selectedApp.isSystemApp ? "System" : "User"}
+                                        </Text>
+                                    </View>
+                                    {isBloatware(selectedApp.packageName) && (
+                                        <View style={[styles.metaBadge, { backgroundColor: theme.semantic.warning + "22" }]}>
+                                            <Text style={[styles.metaBadgeText, { color: theme.semantic.warning }]}>Bloatware</Text>
+                                        </View>
+                                    )}
+                                    {protectedPkgs.has(selectedApp.packageName) && (
+                                        <View style={[styles.metaBadge, { backgroundColor: theme.semantic.success + "22" }]}>
+                                            <Ionicons name="shield-checkmark" size={11} color={theme.semantic.success} />
+                                            <Text style={[styles.metaBadgeText, { color: theme.semantic.success }]}>Protected</Text>
+                                        </View>
+                                    )}
+                                </View>
+
+                                {/* Quick actions: Open + App Info */}
+                                <View style={styles.sheetRow}>
+                                    <TouchableOpacity
+                                        onPress={() => doLaunchApp(selectedApp)}
+                                        style={[styles.sheetBtn, { backgroundColor: theme.scale[3], flex: 1, marginRight: 6 }]}
+                                    >
+                                        <Ionicons name="rocket-outline" size={16} color={theme.scale[9]} />
+                                        <Text style={[styles.sheetBtnText, { color: theme.scale[10], fontSize: 13 }]}>Mở app</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        onPress={() => doOpenAppInfo(selectedApp)}
+                                        style={[styles.sheetBtn, { backgroundColor: theme.scale[3], flex: 1, marginRight: 6 }]}
+                                    >
+                                        <Ionicons name="information-circle-outline" size={16} color={theme.scale[9]} />
+                                        <Text style={[styles.sheetBtnText, { color: theme.scale[10], fontSize: 13 }]}>App Info</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        onPress={() => doViewPermissions(selectedApp)}
+                                        style={[styles.sheetBtn, { backgroundColor: theme.scale[3], flex: 1 }]}
+                                    >
+                                        <Ionicons name="key-outline" size={16} color={theme.scale[9]} />
+                                        <Text style={[styles.sheetBtnText, { color: theme.scale[10], fontSize: 13 }]}>Quyền</Text>
+                                    </TouchableOpacity>
+                                </View>
 
                                 {/* Disable / Enable */}
                                 <View style={styles.sheetRow}>
@@ -820,29 +1119,58 @@ export default function AppsScreen() {
                                     <Text style={[styles.sheetBtnText, { color: theme.semantic.warning }]}>Force Stop</Text>
                                 </TouchableOpacity>
 
-                                {/* Widget toggle */}
-                                <TouchableOpacity
-                                    onPress={async () => {
-                                        const pkg = selectedApp?.packageName;
-                                        if (!pkg) return;
-                                        closeSheet();
-                                        if (widgetAppsSet.has(pkg)) {
-                                            await removeFromWidget(pkg);
-                                        } else {
-                                            await addToWidget(selectedApp);
-                                        }
-                                    }}
-                                    style={[styles.sheetBtn, { backgroundColor: theme.scale[3] }]}
-                                >
-                                    <Ionicons
-                                        name={widgetAppsSet.has(selectedApp?.packageName) ? "star" : "star-outline"}
-                                        size={18}
-                                        color={theme.scale[9]}
-                                    />
-                                    <Text style={[styles.sheetBtnText, { color: theme.scale[10] }]}>
-                                        {widgetAppsSet.has(selectedApp?.packageName) ? "Xóa khỏi Widget" : "Thêm vào Widget"}
-                                    </Text>
-                                </TouchableOpacity>
+                                {/* Widget + Protected + Extract row */}
+                                <View style={styles.sheetRow}>
+                                    <TouchableOpacity
+                                        onPress={async () => {
+                                            const pkg = selectedApp?.packageName;
+                                            if (!pkg) return;
+                                            closeSheet();
+                                            if (widgetAppsSet.has(pkg)) await removeFromWidget(pkg);
+                                            else await addToWidget(selectedApp);
+                                        }}
+                                        style={[styles.sheetBtn, { backgroundColor: theme.scale[3], flex: 1, marginRight: 6 }]}
+                                    >
+                                        <Ionicons
+                                            name={widgetAppsSet.has(selectedApp?.packageName) ? "star" : "star-outline"}
+                                            size={16}
+                                            color={theme.scale[9]}
+                                        />
+                                        <Text style={[styles.sheetBtnText, { color: theme.scale[10], fontSize: 13 }]}>
+                                            {widgetAppsSet.has(selectedApp?.packageName) ? "- Widget" : "+ Widget"}
+                                        </Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        onPress={() => toggleProtected(selectedApp.packageName, selectedApp.appName)}
+                                        style={[styles.sheetBtn, {
+                                            backgroundColor: protectedPkgs.has(selectedApp.packageName)
+                                                ? theme.semantic.success + "22" : theme.scale[3],
+                                            flex: 1, marginRight: 6,
+                                        }]}
+                                    >
+                                        <Ionicons
+                                            name={protectedPkgs.has(selectedApp.packageName) ? "shield-checkmark" : "shield-outline"}
+                                            size={16}
+                                            color={protectedPkgs.has(selectedApp.packageName) ? theme.semantic.success : theme.scale[9]}
+                                        />
+                                        <Text style={[styles.sheetBtnText, {
+                                            color: protectedPkgs.has(selectedApp.packageName) ? theme.semantic.success : theme.scale[10],
+                                            fontSize: 13,
+                                        }]}>
+                                            {protectedPkgs.has(selectedApp.packageName) ? "Protected" : "Protect"}
+                                        </Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        onPress={() => doExtractApk(selectedApp)}
+                                        disabled={extractingPkg === selectedApp.packageName}
+                                        style={[styles.sheetBtn, { backgroundColor: theme.scale[3], flex: 1, opacity: extractingPkg === selectedApp.packageName ? 0.5 : 1 }]}
+                                    >
+                                        <Ionicons name="download-outline" size={16} color={theme.scale[9]} />
+                                        <Text style={[styles.sheetBtnText, { color: theme.scale[10], fontSize: 13 }]}>
+                                            {extractingPkg === selectedApp.packageName ? "..." : "APK"}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
 
                                 {/* Uninstall */}
                                 <TouchableOpacity
@@ -873,6 +1201,7 @@ const styles = StyleSheet.create({
     // Header
     header:        { marginTop: 20, marginHorizontal: 20, marginBottom: 4 },
     headerTop:     { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+    headerBtns:    { flexDirection: "row", alignItems: "center", gap: 8 },
     statusLabel:   { fontWeight: "700", fontSize: 17 },
     brand:         { fontSize: 11, fontWeight: "500", marginTop: 2 },
     rootToggle:    { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, minHeight: 36 },
@@ -880,10 +1209,15 @@ const styles = StyleSheet.create({
 
     // Search
     searchWrapper: { marginHorizontal: 20, marginTop: 20, marginBottom: 4 },
+    searchRow:     { flexDirection: "row", alignItems: "center", gap: 8 },
     searchBox:     { flexDirection: "row", alignItems: "center", borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, minHeight: 44 },
     searchIcon:    { marginRight: 8 },
     searchInput:   { flex: 1, fontSize: 14, padding: 0, margin: 0 },
     countLabel:    { fontSize: 11, marginTop: 6, marginLeft: 4 },
+    sortBtn:       { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+    sortPicker:    { marginHorizontal: 20, marginTop: 8, borderRadius: 16, padding: 8 },
+    sortOption:    { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12 },
+    sortOptionText:{ fontSize: 13, fontWeight: "500" },
 
     // Filters
     filtersRow:      { flexDirection: "row", marginHorizontal: 20, marginTop: 10, marginBottom: 8, gap: 8 },
@@ -911,8 +1245,24 @@ const styles = StyleSheet.create({
     sheetIconRow:  { alignItems: "center", marginBottom: 4 },
     sheetIcon:     { width: 64, height: 64, borderRadius: 16 },
     sheetAppName:  { fontWeight: "700", fontSize: 17, textAlign: "center" },
-    sheetPkg:      { fontSize: 12, textAlign: "center", marginBottom: 4 },
-    sheetRow:      { flexDirection: "row" },
-    sheetBtn:      { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 14, paddingHorizontal: 20, borderRadius: 999, gap: 8, minHeight: 48 },
-    sheetBtnText:  { fontWeight: "600", fontSize: 15, textAlign: "center" },
+    sheetPkg:      { fontSize: 12, textAlign: "center", marginBottom: 2 },
+    sheetMeta:     { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 6, marginBottom: 4 },
+    metaBadge:     { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+    metaBadgeText: { fontSize: 11, fontWeight: "600" },
+    sheetRow:      { flexDirection: "row", gap: 6 },
+    sheetBtn:      { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 12, paddingHorizontal: 16, borderRadius: 999, gap: 6, minHeight: 44 },
+    sheetBtnText:  { fontWeight: "600", fontSize: 14, textAlign: "center" },
+
+    // Permission Modal
+    modalOverlay:  { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+    modalCard:     { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: "75%" },
+    modalHeader:   { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+    modalTitle:    { fontSize: 16, fontWeight: "700", flex: 1, marginRight: 8 },
+    permList:      { maxHeight: 400 },
+    permItem:      { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10 },
+    permLeft:      { flexDirection: "row", alignItems: "flex-start", gap: 6, flex: 1, marginRight: 8 },
+    permName:      { fontSize: 12, flex: 1 },
+    permBadge:     { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+    permBadgeText: { fontSize: 10, fontWeight: "600" },
+    permEmpty:     { textAlign: "center", padding: 20, fontStyle: "italic" },
 });

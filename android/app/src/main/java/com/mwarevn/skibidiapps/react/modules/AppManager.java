@@ -228,6 +228,21 @@ public class AppManager extends ReactContextBaseJavaModule {
         });
     }
 
+    @ReactMethod
+    public void clearData(String packageName, Promise promise) {
+        if (!checkService(promise)) return;
+        executor.execute(() -> {
+            try {
+                getService().clearData(packageName);
+                promise.resolve("ok");
+            } catch (RemoteException e) {
+                String msg = e.getMessage() != null ? e.getMessage() : Log.getStackTraceString(e);
+                Log.e(TAG, "clearData failed", e);
+                promise.reject("ERROR", msg);
+            }
+        });
+    }
+
     /**
      * Force-uninstall qua ADB shell (Shizuku) — multi-strategy, không fallback về disabled.
      * Phù hợp với app có device-admin hoặc quyền cứng đầu (không cần root).

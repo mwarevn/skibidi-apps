@@ -414,6 +414,20 @@ public class RootModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
+    public void clearData(String packageName, Promise promise) {
+        executor.execute(() -> {
+            String su = findSu();
+            if (su == null) { promise.reject("NO_ROOT", "Root not available"); return; }
+            try {
+                String r = runAsRoot(su, "pm clear " + packageName);
+                promise.resolve(r);
+            } catch (Exception e) {
+                promise.reject("ERROR", e.getMessage());
+            }
+        });
+    }
+
+    @ReactMethod
     public void forceStopPackage(String packageName, Promise promise) {
         executor.execute(() -> {
             String su = findSu();

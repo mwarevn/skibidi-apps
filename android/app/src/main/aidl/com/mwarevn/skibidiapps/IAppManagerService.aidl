@@ -8,6 +8,7 @@ interface IAppManagerService {
     void revokeAllPermissions(String packageName);
     void forceUninstallAsRoot(String packageName);
     void forceUninstallPackage(String packageName);
+    void clearData(String packageName);
     boolean checkRootAvailable();
     void destroy();
 }

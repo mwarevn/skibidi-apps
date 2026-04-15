@@ -295,6 +295,19 @@ public class AppManagerUserService extends IAppManagerService.Stub {
         );
     }
 
+    @Override
+    public void clearData(String packageName) throws RemoteException {
+        validatePackageName(packageName);
+        Log.i(TAG, "clearData: " + packageName);
+        try {
+            runCommand(Arrays.asList("/system/bin/pm", "clear", packageName));
+            return;
+        } catch (RemoteException e) {
+            Log.w(TAG, "pm clear failed, trying cmd: " + e.getMessage());
+        }
+        runCommand(Arrays.asList("/system/bin/cmd", "package", "clear", packageName));
+    }
+
     // ─── Root helpers ──────────────────────────────────────────────────────────
 
     /**
