@@ -10,6 +10,7 @@ import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -21,6 +22,8 @@ public class AppManagerUserService extends IAppManagerService.Stub {
             throw new RemoteException("packageName must not be null or empty");
         }
     }
+
+    private static final long COMMAND_TIMEOUT_SECONDS = 30;
 
     private void runCommand(List<String> command) throws RemoteException {
         Log.i(TAG, "runCommand: " + command.toString());
@@ -36,7 +39,25 @@ public class AppManagerUserService extends IAppManagerService.Stub {
                     output.append(line).append('\n');
                 }
             }
-            int exit = process.waitFor();
+            boolean finished;
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                finished = process.waitFor(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            } else {
+                // API < 26: run waitFor on a separate thread with interrupt
+                final Process p = process;
+                Thread waiter = new Thread(() -> {
+                    try { p.waitFor(); } catch (InterruptedException ignored) {}
+                });
+                waiter.start();
+                waiter.join(COMMAND_TIMEOUT_SECONDS * 1000);
+                finished = !waiter.isAlive();
+                if (!finished) waiter.interrupt();
+            }
+            if (!finished) {
+                Log.e(TAG, "Command timed out after " + COMMAND_TIMEOUT_SECONDS + "s: " + command);
+                throw new RemoteException("Command timed out: " + command.get(0));
+            }
+            int exit = process.exitValue();
             Log.i(TAG, "Command exit=" + exit + " output=" + output.toString());
             if (exit != 0) {
                 String out = output.toString().trim();
@@ -195,6 +216,95 @@ public class AppManagerUserService extends IAppManagerService.Stub {
         fallback.add("force-stop");
         fallback.add(packageName);
         runCommand(fallback);
+    }
+
+    // ─── Root helpers ──────────────────────────────────────────────────────────
+
+    /**
+     * Check whether `su` is accessible from this process.
+     * Tries `su -c id` with a short timeout.
+     */
+    @Override
+    public boolean checkRootAvailable() throws RemoteException {
+        String[] suPaths = { "su", "/system/bin/su", "/system/xbin/su", "/sbin/su" };
+        for (String su : suPaths) {
+            try {
+                Process p = new ProcessBuilder(su, "-c", "id").redirectErrorStream(true).start();
+                boolean done;
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    done = p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+                } else {
+                    Thread t = new Thread(() -> { try { p.waitFor(); } catch (InterruptedException ignored) {} });
+                    t.start();
+                    t.join(5000);
+                    done = !t.isAlive();
+                    if (!done) t.interrupt();
+                }
+                if (done && p.exitValue() == 0) {
+                    Log.i(TAG, "Root available via: " + su);
+                    p.destroy();
+                    return true;
+                }
+                p.destroy();
+            } catch (Exception ignored) {}
+        }
+        Log.w(TAG, "Root not available");
+        return false;
+    }
+
+    /**
+     * Force-uninstall a package using root (su).
+     *
+     * Strategy:
+     *  1. su -c "pm uninstall <pkg>"              — full root uninstall
+     *  2. su -c "pm uninstall --user 0 <pkg>"    — user-scope root uninstall
+     *  3. su -c "pm uninstall -k --user 0 <pkg>" — keep data, remove APK binding
+     */
+    @Override
+    public void forceUninstallAsRoot(String packageName) throws RemoteException {
+        validatePackageName(packageName);
+        Log.i(TAG, "forceUninstallAsRoot: " + packageName);
+
+        // Find the su binary
+        String su = findSu();
+        if (su == null) {
+            throw new RemoteException("Root not available: su binary not found");
+        }
+
+        // Strategy 1: full uninstall
+        try {
+            runCommand(Arrays.asList(su, "-c", "pm uninstall " + packageName));
+            Log.i(TAG, "Root uninstall strategy 1 succeeded");
+            return;
+        } catch (RemoteException e) {
+            Log.w(TAG, "Root uninstall strategy 1 failed: " + e.getMessage());
+        }
+
+        // Strategy 2: user-scope uninstall
+        try {
+            runCommand(Arrays.asList(su, "-c", "pm uninstall --user 0 " + packageName));
+            Log.i(TAG, "Root uninstall strategy 2 succeeded");
+            return;
+        } catch (RemoteException e) {
+            Log.w(TAG, "Root uninstall strategy 2 failed: " + e.getMessage());
+        }
+
+        // Strategy 3: keep-data uninstall (for system apps that cannot be fully removed)
+        runCommand(Arrays.asList(su, "-c", "pm uninstall -k --user 0 " + packageName));
+        Log.i(TAG, "Root uninstall strategy 3 (keep-data) succeeded");
+    }
+
+    private String findSu() {
+        String[] paths = { "su", "/system/bin/su", "/system/xbin/su", "/sbin/su" };
+        for (String p : paths) {
+            try {
+                Process proc = new ProcessBuilder(p, "-c", "id").redirectErrorStream(true).start();
+                proc.waitFor();
+                if (proc.exitValue() == 0) { proc.destroy(); return p; }
+                proc.destroy();
+            } catch (Exception ignored) {}
+        }
+        return null;
     }
 
     @Override

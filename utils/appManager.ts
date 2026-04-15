@@ -1,9 +1,11 @@
 import { NativeModules } from "react-native";
 
-const { ShizukuModule, AppManager, AppManagerBinder } = NativeModules as any;
+const { ShizukuModule, AppManager, AppManagerBinder, RootModule } = NativeModules as any;
+
+// ─── Shizuku / AppManager (ADB-level) ────────────────────────────────────────
 
 const DEFAULT_TIMEOUT = 10000;
-const POLL_INTERVAL = 500;
+const POLL_INTERVAL   = 500;
 
 async function ensureShizukuPermission(): Promise<boolean> {
     try {
@@ -11,78 +13,128 @@ async function ensureShizukuPermission(): Promise<boolean> {
         if (has) return true;
         const granted = await ShizukuModule.requestPermission();
         return !!granted;
-    } catch (err) {
-        console.warn("Shizuku permission check failed", err);
+    } catch {
         return false;
     }
 }
 
 async function triggerBind(): Promise<void> {
     try {
-        // prefer calling the lightweight binder if present
-        if (AppManagerBinder && typeof AppManagerBinder.binService === "function") {
-            AppManagerBinder.binService();
-            return;
+        if (AppManagerBinder?.binService) {
+            await AppManagerBinder.binService();
         }
-
-        if (!AppManager) return;
-        // fallback: call binService on AppManager (legacy)
-        AppManager.binService && AppManager.binService();
     } catch (err) {
-        console.warn("Error triggering AppManager.bindService", err);
+        console.warn("triggerBind failed:", err);
     }
 }
 
-function isAppManagerReady(): boolean {
-    // Heuristic: AppManager exists and has the methods we expect
+function isShizukuModulePresent(): boolean {
     return !!(AppManager && typeof AppManager.disablePackage === "function");
 }
 
 export async function ensureBound(timeout = DEFAULT_TIMEOUT): Promise<boolean> {
     const start = Date.now();
-
     const ok = await ensureShizukuPermission();
     if (!ok) return false;
 
-    // trigger a bind attempt
-    await triggerBind();
+    try {
+        await triggerBind();
+        return true;
+    } catch { /* ignore */ }
 
-    // poll until AppManager methods are available or timeout
+    // fallback polling (in case bind fires but promise rejects)
     return new Promise((resolve) => {
-        const tick = async () => {
-            if (isAppManagerReady()) return resolve(true);
+        const tick = () => {
+            if (isShizukuModulePresent()) return resolve(true);
             if (Date.now() - start > timeout) return resolve(false);
-            // try triggering again occasionally
-            await triggerBind();
             setTimeout(tick, POLL_INTERVAL);
         };
         tick();
     });
 }
 
-async function callSafe(method: string, ...args: any[]) {
-    // basic validation: most methods expect a non-empty package name as first arg
-    const pkg = args && args.length > 0 ? args[0] : null;
-    if (typeof pkg !== "string" || pkg.trim() === "") {
-        throw new Error("Invalid package name");
+async function callShizuku(method: string, pkg: string) {
+    if (!pkg || !pkg.trim()) throw new Error("Invalid package name");
+    if (!AppManager?.[method]) throw new Error("Shizuku AppManager not available");
+    return AppManager[method](pkg);
+}
+
+// ─── Root (trực tiếp từ app process, không qua Shizuku) ─────────────────────
+
+async function callRoot(method: string, pkg?: string): Promise<any> {
+    if (!RootModule) throw new Error("RootModule not available");
+
+    if (method === "checkRootAvailable") {
+        return RootModule.checkRootAvailable();
     }
 
-    if (!isAppManagerReady()) {
-        const bound = await ensureBound();
-        if (!bound) throw new Error("AppManager not ready");
-    }
+    if (!pkg || !pkg.trim()) throw new Error("Invalid package name");
+    if (typeof RootModule[method] !== "function") throw new Error(`RootModule.${method} not found`);
+    return RootModule[method](pkg);
+}
 
-    if (!AppManager || typeof AppManager[method] !== "function") throw new Error("Method not available");
+// ─── Unified wrapper ──────────────────────────────────────────────────────────
 
-    return AppManager[method](...args);
+export type UninstallResult =
+    | { success: true;  strategy: "full" | "user" | "keepdata" | "disabled" }
+    | { success: false; error: string };
+
+/**
+ * Parse kết quả từ RootModule.uninstallPackage:
+ *   "ok:full:..."      → thành công, gỡ hoàn toàn
+ *   "ok:user:..."      → thành công, gỡ cho user
+ *   "ok:keepdata:..."  → thành công, giữ data
+ *   "disabled:..."     → fallback disable (không xóa được APK)
+ */
+function parseRootUninstallResult(raw: string): UninstallResult {
+    if (raw.startsWith("ok:full:"))     return { success: true,  strategy: "full" };
+    if (raw.startsWith("ok:user:"))     return { success: true,  strategy: "user" };
+    if (raw.startsWith("ok:keepdata:")) return { success: true,  strategy: "keepdata" };
+    if (raw.startsWith("disabled:"))    return { success: true,  strategy: "disabled" };
+    return { success: true, strategy: "full" };
 }
 
 export const AppManagerWrapper = {
     ensureBound,
-    disablePackage: (pkg: string) => callSafe("disablePackage", pkg),
-    enablePackage: (pkg: string) => callSafe("enablePackage", pkg),
-    forceStopPackage: (pkg: string) => callSafe("forceStopPackage", pkg),
-    uninstallPackage: (pkg: string) => callSafe("uninstallPackage", pkg),
+
+    // ── Shizuku methods ──────────────────────────────────────────────────────
+    shizuku: {
+        disablePackage:   (pkg: string) => callShizuku("disablePackage",   pkg),
+        enablePackage:    (pkg: string) => callShizuku("enablePackage",    pkg),
+        forceStopPackage: (pkg: string) => callShizuku("forceStopPackage", pkg),
+        uninstallPackage: (pkg: string) => callShizuku("uninstallPackage", pkg),
+    },
+
+    // ── Root methods (không qua Shizuku) ─────────────────────────────────────
+    root: {
+        checkAvailable:   ():            Promise<boolean> => callRoot("checkRootAvailable").catch(() => false),
+        disablePackage:   (pkg: string) => callRoot("disablePackage",   pkg),
+        enablePackage:    (pkg: string) => callRoot("enablePackage",    pkg),
+        forceStopPackage: (pkg: string) => callRoot("forceStopPackage", pkg),
+        uninstallPackage: async (pkg: string): Promise<UninstallResult> => {
+            try {
+                const raw: string = await callRoot("uninstallPackage", pkg);
+                return parseRootUninstallResult(raw);
+            } catch (e: any) {
+                return { success: false, error: e?.message ?? String(e) };
+            }
+        },
+    },
+
+    // ── Convenience — chọn đúng backend theo rootMode ────────────────────────
+    disablePackage:   (pkg: string, rootMode: boolean) =>
+        rootMode ? callRoot("disablePackage", pkg) : callShizuku("disablePackage", pkg),
+
+    enablePackage:    (pkg: string, rootMode: boolean) =>
+        rootMode ? callRoot("enablePackage", pkg) : callShizuku("enablePackage", pkg),
+
+    forceStopPackage: (pkg: string, rootMode: boolean) =>
+        rootMode ? callRoot("forceStopPackage", pkg) : callShizuku("forceStopPackage", pkg),
+
+    uninstallPackage: (pkg: string, rootMode: boolean) =>
+        rootMode ? AppManagerWrapper.root.uninstallPackage(pkg) : callShizuku("uninstallPackage", pkg),
+
+    checkRootAvailable: (): Promise<boolean> => AppManagerWrapper.root.checkAvailable(),
 };
 
 export default AppManagerWrapper;

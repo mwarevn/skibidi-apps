@@ -1,15 +1,18 @@
+import { useTheme } from "@/hooks/use-theme-color";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useCallback, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 type Props = {
     item: any;
     setSelectedApps: (apps: any[]) => void;
     selectedApps: any[];
     onLongPress?: (item: any) => void;
+    isPending?: boolean;
 };
 
-function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress }: Props) {
+function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress, isPending = false }: Props) {
+    const theme = useTheme();
     const isSelected = selectedApps.some((i: any) => i.packageName === item.packageName);
     const [isPressed, setIsPressed] = useState(false);
 
@@ -25,35 +28,69 @@ function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress }: 
         onLongPress && onLongPress(item);
     }, [onLongPress, item]);
 
+    const bgColor = isSelected
+        ? theme.scale[3]
+        : isPressed
+        ? theme.scale[2]
+        : 'transparent';
+
     return (
         <Pressable
-            style={[styles.pressable, isSelected ? styles.selected : undefined, isPressed ? styles.pressed : undefined]}
-            onLongPress={handleLongPress}
-            onPressIn={() => setIsPressed(true)}
+            style={[styles.pressable, { backgroundColor: bgColor, opacity: isPending ? 0.55 : 1 }]}
+            onLongPress={isPending ? undefined : handleLongPress}
+            onPressIn={() => !isPending && setIsPressed(true)}
             onPressOut={() => setIsPressed(false)}
+            disabled={isPending}
         >
             <View style={styles.row}>
-                {item.iconBase64 ? (
-                    <Image
-                        source={{ uri: `data:image/png;base64,${item.iconBase64}` }}
-                        style={styles.icon}
-                        resizeMode="cover"
-                    />
-                ) : (
-                    <View style={[styles.icon, styles.placeholderIcon]} />
-                )}
-                <View style={styles.textContainer}>
-                    <Text style={styles.name}>{item.appName}</Text>
-                    <Text style={styles.pkg}>{item.packageName}</Text>
-                    {!item.enabled && <Text style={styles.disabledTag}>disabled</Text>}
+                {/* Icon */}
+                <View style={styles.iconWrapper}>
+                    {item.iconBase64 ? (
+                        <Image
+                            source={{ uri: `data:image/png;base64,${item.iconBase64}` }}
+                            style={styles.icon}
+                            resizeMode="cover"
+                        />
+                    ) : (
+                        <View style={[styles.icon, { backgroundColor: theme.scale[3] }]} />
+                    )}
+                    {isPending && (
+                        <View style={[styles.pendingOverlay, { backgroundColor: theme.scale[1] + 'cc' }]}>
+                            <ActivityIndicator size="small" color={theme.scale[8]} />
+                        </View>
+                    )}
                 </View>
-                <TouchableOpacity onPress={handleCheckboxPress} style={styles.checkbox}>
-                    <Ionicons
-                        name={isSelected ? "checkbox" : "square-outline"}
-                        size={24}
-                        color={isSelected ? "#007AFF" : "#ccc"}
-                    />
-                </TouchableOpacity>
+
+                {/* Text */}
+                <View style={styles.textContainer}>
+                    <Text style={[styles.name, { color: theme.scale[11] }]} numberOfLines={1}>
+                        {item.appName}
+                    </Text>
+                    <Text style={[styles.pkg, { color: theme.scale[8] }]} numberOfLines={1}>
+                        {item.packageName}
+                    </Text>
+                    {!item.enabled && !isPending && (
+                        <Text style={[styles.disabledTag, { color: theme.semantic.error }]}>
+                            disabled
+                        </Text>
+                    )}
+                    {isPending && (
+                        <Text style={[styles.disabledTag, { color: theme.scale[8] }]}>
+                            đang xử lý...
+                        </Text>
+                    )}
+                </View>
+
+                {/* Checkbox */}
+                {!isPending && (
+                    <TouchableOpacity onPress={handleCheckboxPress} style={styles.checkbox} hitSlop={8}>
+                        <Ionicons
+                            name={isSelected ? "checkbox" : "square-outline"}
+                            size={24}
+                            color={isSelected ? theme.accent[0] : theme.scale[6]}
+                        />
+                    </TouchableOpacity>
+                )}
             </View>
         </Pressable>
     );
@@ -62,33 +99,35 @@ function AppItemComponent({ item, setSelectedApps, selectedApps, onLongPress }: 
 export default React.memo(AppItemComponent);
 
 const styles = StyleSheet.create({
-    item: {
-        flexDirection: "row",
-        alignItems: "center",
-        padding: 10,
-    },
     pressable: {
-        backgroundColor: "transparent",
+        borderRadius: 16,
+        marginHorizontal: 4,
     },
     row: {
         flexDirection: "row",
         alignItems: "center",
-        padding: 10,
+        paddingVertical: 10,
+        paddingHorizontal: 8,
+        minHeight: 44,
+    },
+    iconWrapper: {
+        position: "relative",
+        marginRight: 12,
     },
     icon: {
         width: 40,
         height: 40,
-        marginRight: 10,
-        borderRadius: 8,
+        borderRadius: 12,
     },
-    placeholderIcon: {
-        backgroundColor: "#ccc",
+    pendingOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
     },
-    selected: {
-        backgroundColor: "#e3f2fd",
-    },
-    pressed: {
-        backgroundColor: "#f5f5f5",
+    textContainer: {
+        flex: 1,
+        marginRight: 8,
     },
     name: {
         fontSize: 14,
@@ -96,15 +135,18 @@ const styles = StyleSheet.create({
     },
     pkg: {
         fontSize: 12,
-        color: "#666",
+        marginTop: 1,
     },
     disabledTag: {
-        color: "orangered",
-    },
-    textContainer: {
-        flex: 1,
+        fontSize: 11,
+        fontWeight: "500",
+        marginTop: 2,
     },
     checkbox: {
-        padding: 5,
+        padding: 4,
+        minWidth: 44,
+        minHeight: 44,
+        alignItems: "center",
+        justifyContent: "center",
     },
 });

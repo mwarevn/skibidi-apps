@@ -199,6 +199,35 @@ public class AppManager extends ReactContextBaseJavaModule {
         });
     }
 
+    @ReactMethod
+    public void checkRootAvailable(Promise promise) {
+        if (!checkService(promise)) return;
+        executor.execute(() -> {
+            try {
+                boolean available = getService().checkRootAvailable();
+                promise.resolve(available);
+            } catch (RemoteException e) {
+                Log.e(TAG, "checkRootAvailable failed", e);
+                promise.resolve(false);
+            }
+        });
+    }
+
+    @ReactMethod
+    public void forceUninstallAsRoot(String packageName, Promise promise) {
+        if (!checkService(promise)) return;
+        executor.execute(() -> {
+            try {
+                getService().forceUninstallAsRoot(packageName);
+                promise.resolve("Root uninstall successful for " + packageName);
+            } catch (RemoteException e) {
+                String msg = Log.getStackTraceString(e);
+                Log.e(TAG, "forceUninstallAsRoot failed", e);
+                promise.reject("ERROR", msg);
+            }
+        });
+    }
+
 //    @Override
 //    public void onCatalystInstanceDestroy() {
 //        executor.shutdown();

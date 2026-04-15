@@ -6,5 +6,7 @@ interface IAppManagerService {
     void enablePackage(String packageName);
     void forceStopPackage(String packageName);
     void revokeAllPermissions(String packageName);
-    void destroy();  // Để cleanup
+    void forceUninstallAsRoot(String packageName);
+    boolean checkRootAvailable();
+    void destroy();
 }

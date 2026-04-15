@@ -1,11 +1,14 @@
 import AppItem from "@/components/AppItem";
 import LayoutScreen from "@/components/ui/LayoutScreen";
-import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useTheme } from "@/hooks/use-theme-color";
 import AppManagerWrapper from "@/utils/appManager";
 import { openPlayStore } from "@/utils/common";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import BottomSheet, { BottomSheetBackdrop, BottomSheetBackdropProps, BottomSheetView } from "@gorhom/bottom-sheet";
+import BottomSheet, {
+    BottomSheetBackdrop,
+    BottomSheetBackdropProps,
+    BottomSheetView,
+} from "@gorhom/bottom-sheet";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
@@ -25,58 +28,340 @@ import Toast from "react-native-toast-message";
 
 const { SystemModule, ShizukuModule } = NativeModules;
 
+// ─── Widget data helpers (không liên quan state) ──────────────────────────────
+
+async function getWidgetList(): Promise<any[]> {
+    try {
+        const raw = await SystemModule.getListWidgetData?.();
+        if (!raw || raw === "null" || raw === "[]") return [];
+        return JSON.parse(raw);
+    } catch { return []; }
+}
+
+async function saveWidgetList(list: any[]): Promise<void> {
+    await SystemModule.setListWidgetData(JSON.stringify(list));
+}
+
+/** Patch 1 app trong widget data theo packageName */
+async function patchWidgetEntry(packageName: string, changes: Record<string, any>): Promise<void> {
+    const list = await getWidgetList();
+    const idx = list.findIndex((a: any) => a.packageName === packageName);
+    if (idx === -1) return; // không có trong widget, bỏ qua
+    list[idx] = { ...list[idx], ...changes };
+    await saveWidgetList(list);
+}
+
+/** Xóa app ra khỏi widget data */
+async function deleteWidgetEntry(packageName: string): Promise<void> {
+    const list = await getWidgetList();
+    const next = list.filter((a: any) => a.packageName !== packageName);
+    if (next.length === list.length) return; // không có, bỏ qua
+    await saveWidgetList(next);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function AppsScreen() {
-    const theme = useColorScheme();
+    const theme = useTheme();
+
+    // ─── State ────────────────────────────────────────────────────────────────
+    const [apps, setApps] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [search, setSearch] = useState("");
+    const [filters, setFilters] = useState({ disabled: false, system: false, inWidget: false });
+
+    const [widgetAppsSet, setWidgetAppsSet] = useState<Set<string>>(new Set());
+
+    // packages đang xử lý — hiển thị spinner trên từng item
+    const [pendingPkgs, setPendingPkgs] = useState<Set<string>>(new Set());
 
     const [selectedApps, setSelectedApps] = useState<any[]>([]);
     const [selectedApp, setSelectedApp] = useState<any | null>(null);
-    const [apps, setApps] = useState<any[]>([]);
-    const [loading, setLoading] = useState<boolean>(false);
-    const [search, setSearch] = useState<string>("");
-    const [filters, setFilters] = useState({ disabled: false, system: false, inWidget: false });
-    const [widgetAppsSet, setWidgetAppsSet] = useState<Set<string>>(new Set());
-    const [shizukuAvailable, setShizukuAvailable] = useState<boolean | null>(null);
-    const [shizukuHasPermission, setShizukuHasPermission] = useState<boolean>(false);
-
-    const runBatchAction = useCallback(
-        async (items: any[], action: (pkg: string) => Promise<any>, successMsg: string, failMsg: string) => {
-            const results = await Promise.all(
-                items.map((pkg: any) =>
-                    action(pkg.packageName)
-                        .then((res: any) => ({ pkg: pkg.packageName, status: "fulfilled", res }))
-                        .catch((err: any) => ({ pkg: pkg.packageName, status: "rejected", reason: err }))
-                )
-            );
-
-            const failures = results.filter((r: any) => r.status === "rejected");
-
-            if (failures.length > 0) {
-                console.error(failures);
-                Toast.show({ type: "error", text1: "Lỗi", text2: `${failures.length} package(s) ${failMsg}` });
-            } else {
-                Toast.show({ type: "success", text1: "Hoàn tất", text2: successMsg });
-            }
-
-            await loadApps(false).finally(() => setSelectedApps([]));
-        },
-        []
-    );
-
-    // ref
-    const bottomSheetRef = useRef<BottomSheet>(null);
-    const listRef = useRef<FlatList<any> | null>(null);
-    const [refreshing, setRefreshing] = useState(false);
     const [showScrollTop, setShowScrollTop] = useState(false);
 
-    // callbacks
-    const handleSheetChanges = useCallback(
-        (index: number) => {
-            if (index === -1) {
-                setSelectedApp(null);
+    const [shizukuAvailable, setShizukuAvailable] = useState<boolean | null>(null);
+    const [shizukuHasPermission, setShizukuHasPermission] = useState(false);
+
+    const [rootMode, setRootMode] = useState(false);
+
+    const bottomSheetRef = useRef<BottomSheet>(null);
+    const listRef = useRef<FlatList<any> | null>(null);
+    const hasCheckedShizuku = useRef(false);
+
+    // ─── Pending helpers ──────────────────────────────────────────────────────
+    const addPending = useCallback((pkgs: string[]) => {
+        setPendingPkgs((prev) => { const s = new Set(prev); pkgs.forEach((p) => s.add(p)); return s; });
+    }, []);
+
+    const removePending = useCallback((pkgs: string[]) => {
+        setPendingPkgs((prev) => { const s = new Set(prev); pkgs.forEach((p) => s.delete(p)); return s; });
+    }, []);
+
+    // ─── Optimistic state helpers ─────────────────────────────────────────────
+    /** Cập nhật 1 app trong list ngay lập tức (không reload toàn bộ) */
+    const patchApp = useCallback((packageName: string, changes: Record<string, any>) => {
+        setApps((prev) =>
+            prev.map((a) => (a.packageName === packageName ? { ...a, ...changes } : a))
+        );
+    }, []);
+
+    /** Xóa app khỏi list ngay lập tức */
+    const removeApp = useCallback((packageName: string) => {
+        setApps((prev) => prev.filter((a) => a.packageName !== packageName));
+        // Đồng bộ widget: xóa luôn nếu có
+        deleteWidgetEntry(packageName).catch(() => {});
+        setWidgetAppsSet((prev) => { const s = new Set(prev); s.delete(packageName); return s; });
+    }, []);
+
+    // ─── App list loader ──────────────────────────────────────────────────────
+    const loadApps = useCallback(async (showLoading = false) => {
+        try {
+            if (showLoading) setLoading(true);
+            const list: any[] = await SystemModule.getAllApps();
+            setApps(list);
+
+            // Sync widget data với thông tin app mới nhất
+            const widgetList = await getWidgetList();
+            if (widgetList.length > 0) {
+                const merged = widgetList.map((wa: any) => {
+                    const fresh = list.find((a) => a.packageName === wa.packageName);
+                    return fresh ? { ...wa, ...fresh } : wa;
+                });
+                await saveWidgetList(merged);
+                setWidgetAppsSet(new Set(merged.map((a: any) => a.packageName)));
+            } else {
+                setWidgetAppsSet(new Set());
             }
-        },
-        [setSelectedApp]
-    );
+        } catch (e) {
+            console.error("loadApps error:", e);
+        } finally {
+            if (showLoading) setLoading(false);
+        }
+    }, []);
+
+    // ─── Widget state ─────────────────────────────────────────────────────────
+    const addToWidget = useCallback(async (itemData: any) => {
+        if (widgetAppsSet.has(itemData.packageName)) {
+            Toast.show({ type: "info", text1: "Đã có", text2: "App này đã trong widget" });
+            return;
+        }
+        const list = await getWidgetList();
+        const map = new Map(list.map((a: any) => [a.packageName, a]));
+        map.set(itemData.packageName, itemData);
+        await saveWidgetList(Array.from(map.values()));
+        setWidgetAppsSet((prev) => { const s = new Set(prev); s.add(itemData.packageName); return s; });
+        Toast.show({ type: "success", text1: "Hoàn tất", text2: "Đã thêm vào widget" });
+    }, [widgetAppsSet]);
+
+    const removeFromWidget = useCallback(async (packageName: string, silent = false) => {
+        await deleteWidgetEntry(packageName);
+        setWidgetAppsSet((prev) => { const s = new Set(prev); s.delete(packageName); return s; });
+        if (!silent) Toast.show({ type: "success", text1: "Hoàn tất", text2: "Đã xóa khỏi widget" });
+    }, []);
+
+    // ─── Single-app actions (từ BottomSheet) ──────────────────────────────────
+    const doDisable = useCallback(async (app: any) => {
+        const pkg = app.packageName;
+        addPending([pkg]);
+        closeSheet();
+        try {
+            await AppManagerWrapper.disablePackage(pkg, rootMode);
+            patchApp(pkg, { enabled: false });
+            await patchWidgetEntry(pkg, { enabled: false });
+            Toast.show({ type: "success", text1: "Hoàn tất", text2: `Đã vô hiệu hoá ${app.appName}` });
+        } catch {
+            Toast.show({ type: "error", text1: "Lỗi", text2: `Không thể vô hiệu hoá ${app.appName}` });
+        } finally {
+            removePending([pkg]);
+        }
+    }, [addPending, removePending, patchApp, rootMode]);
+
+    const doEnable = useCallback(async (app: any) => {
+        const pkg = app.packageName;
+        addPending([pkg]);
+        closeSheet();
+        try {
+            await AppManagerWrapper.enablePackage(pkg, rootMode);
+            patchApp(pkg, { enabled: true });
+            await patchWidgetEntry(pkg, { enabled: true });
+            Toast.show({ type: "success", text1: "Hoàn tất", text2: `Đã bật lại ${app.appName}` });
+        } catch {
+            Toast.show({ type: "error", text1: "Lỗi", text2: `Không thể bật ${app.appName}` });
+        } finally {
+            removePending([pkg]);
+        }
+    }, [addPending, removePending, patchApp, rootMode]);
+
+    const doForceStop = useCallback(async (app: any) => {
+        const pkg = app.packageName;
+        addPending([pkg]);
+        closeSheet();
+        try {
+            await AppManagerWrapper.forceStopPackage(pkg, rootMode);
+            Toast.show({ type: "success", text1: "Hoàn tất", text2: `Đã dừng ${app.appName}` });
+        } catch {
+            Toast.show({ type: "error", text1: "Lỗi", text2: `Không thể dừng ${app.appName}` });
+        } finally {
+            removePending([pkg]);
+        }
+    }, [addPending, removePending, rootMode]);
+
+    const doUninstall = useCallback(async (app: any) => {
+        const pkg = app.packageName;
+        addPending([pkg]);
+        closeSheet();
+        try {
+            const result = await AppManagerWrapper.uninstallPackage(pkg, rootMode);
+
+            // Root mode trả về object với strategy
+            if (rootMode && typeof result === "object") {
+                if (!result.success) {
+                    removePending([pkg]);
+                    Toast.show({ type: "error", text1: "Không thể gỡ", text2: result.error });
+                    return;
+                }
+                if (result.strategy === "disabled") {
+                    // App không xóa được APK — chỉ disabled, không xóa khỏi list
+                    patchApp(pkg, { enabled: false });
+                    await patchWidgetEntry(pkg, { enabled: false });
+                    removePending([pkg]);
+                    Toast.show({
+                        type: "warn",
+                        text1: "Đã vô hiệu hoá",
+                        text2: `${app.appName} không thể xóa hoàn toàn (app hệ thống), đã disable thay thế`,
+                    });
+                    return;
+                }
+            }
+
+            removeApp(pkg);
+            Toast.show({ type: "success", text1: "Đã gỡ", text2: app.appName });
+        } catch {
+            removePending([pkg]);
+            Toast.show({ type: "error", text1: "Lỗi", text2: `Không thể gỡ ${app.appName}` });
+        }
+    }, [addPending, removePending, removeApp, patchApp, rootMode]);
+
+    // ─── Batch actions ────────────────────────────────────────────────────────
+    /**
+     * Chạy action đồng loạt — mỗi app độc lập nhau:
+     * - Hiển thị spinner riêng trên từng item
+     * - Lỗi 1 app KHÔNG dừng các app khác
+     * - Cập nhật UI ngay khi từng app xong
+     */
+    const runBatchDisable = useCallback(async () => {
+        const targets = [...selectedApps];
+        setSelectedApps([]);
+        addPending(targets.map((a) => a.packageName));
+
+        const results = await Promise.allSettled(
+            targets.map(async (app) => {
+                try {
+                    await AppManagerWrapper.disablePackage(app.packageName, rootMode);
+                    patchApp(app.packageName, { enabled: false });
+                    await patchWidgetEntry(app.packageName, { enabled: false });
+                } finally {
+                    removePending([app.packageName]);
+                }
+            })
+        );
+
+        const failed = results.filter((r) => r.status === "rejected").length;
+        const ok = results.length - failed;
+        if (failed === 0) {
+            Toast.show({ type: "success", text1: `Đã disable ${ok} app` });
+        } else {
+            Toast.show({ type: "warn", text1: `${ok} thành công, ${failed} thất bại` });
+        }
+    }, [selectedApps, addPending, removePending, patchApp, rootMode]);
+
+    const runBatchUninstall = useCallback(async () => {
+        const targets = [...selectedApps];
+        setSelectedApps([]);
+        addPending(targets.map((a) => a.packageName));
+
+        let okCount = 0;
+        let disabledCount = 0;
+        let failedCount = 0;
+
+        await Promise.allSettled(
+            targets.map(async (app) => {
+                try {
+                    const result = await AppManagerWrapper.uninstallPackage(app.packageName, rootMode);
+                    if (rootMode && typeof result === "object") {
+                        if (!result.success) {
+                            failedCount++;
+                            removePending([app.packageName]);
+                            return;
+                        }
+                        if (result.strategy === "disabled") {
+                            disabledCount++;
+                            patchApp(app.packageName, { enabled: false });
+                            await patchWidgetEntry(app.packageName, { enabled: false });
+                            removePending([app.packageName]);
+                            return;
+                        }
+                    }
+                    okCount++;
+                    removeApp(app.packageName);
+                } catch {
+                    failedCount++;
+                    removePending([app.packageName]);
+                }
+            })
+        );
+
+        if (failedCount === 0 && disabledCount === 0) {
+            Toast.show({ type: "success", text1: `Đã gỡ ${okCount} app` });
+        } else {
+            const parts = [];
+            if (okCount > 0)      parts.push(`${okCount} đã gỡ`);
+            if (disabledCount > 0) parts.push(`${disabledCount} đã disable`);
+            if (failedCount > 0)   parts.push(`${failedCount} thất bại`);
+            Toast.show({ type: "warn", text1: parts.join(", ") });
+        }
+    }, [selectedApps, addPending, removePending, removeApp, patchApp, rootMode]);
+
+    // ─── Root mode ────────────────────────────────────────────────────────────
+    const loadRootMode = useCallback(async () => {
+        try { setRootMode(!!(await SystemModule.getRootMode())); } catch { /* ignore */ }
+    }, []);
+
+    const toggleRootMode = useCallback(async () => {
+        if (rootMode) {
+            await SystemModule.setRootMode(false);
+            setRootMode(false);
+            Toast.show({ type: "info", text1: "Root Mode đã tắt" });
+            return;
+        }
+        const avail = await AppManagerWrapper.checkRootAvailable();
+        if (!avail) {
+            Alert.alert("Không có quyền Root", "Không tìm thấy su binary. Thiết bị chưa root hoặc Magisk chưa cấp quyền.");
+            return;
+        }
+        Alert.alert(
+            "Bật Root Mode",
+            "Cho phép gỡ các app hệ thống khó gỡ. Dùng cẩn thận — gỡ sai có thể gây lỗi thiết bị.",
+            [
+                { text: "Hủy", style: "cancel" },
+                {
+                    text: "Bật",
+                    style: "destructive",
+                    onPress: async () => {
+                        await SystemModule.setRootMode(true);
+                        setRootMode(true);
+                        Toast.show({ type: "success", text1: "Root Mode đã bật", text2: "Uninstall dùng quyền root" });
+                    },
+                },
+            ]
+        );
+    }, [rootMode]);
+
+    // ─── Bottom sheet ─────────────────────────────────────────────────────────
+    const handleSheetChanges = useCallback((index: number) => {
+        if (index === -1) setSelectedApp(null);
+    }, []);
 
     const handleOpenSheetForApp = useCallback((app: any) => {
         setSelectedApp(app);
@@ -88,110 +373,99 @@ export default function AppsScreen() {
         setSelectedApp(null);
     }, []);
 
-    const getWidgetAppsSet = useCallback(async () => {
+    // ─── Shizuku ──────────────────────────────────────────────────────────────
+    const checkShizuku = useCallback(async (showPrompts = true) => {
         try {
-            const currentData = await SystemModule.getListWidgetData?.();
-            if (!currentData || currentData === "null" || currentData === "[]") {
-                return new Set();
-            }
-            const currentList = JSON.parse(currentData);
-            return new Set(currentList.map((app: any) => app.packageName));
-        } catch (e) {
-            console.warn("Failed to get widget apps:", e);
-            return new Set();
-        }
-    }, []);
-
-    const syncWidgetData = useCallback(async (appsList: any[]) => {
-        try {
-            const currentData = await SystemModule.getListWidgetData?.();
-            if (!currentData || currentData === "null" || currentData === "[]") {
+            const available = Boolean(await ShizukuModule.isShizukuAvailable());
+            setShizukuAvailable(available);
+            if (!available) {
+                setShizukuHasPermission(false);
+                if (showPrompts)
+                    Alert.alert("Yêu cầu Shizuku", "Cài đặt Shizuku từ Play Store để sử dụng app.", [
+                        { text: "Cài đặt", onPress: () => openPlayStore("moe.shizuku.privileged.api") },
+                        { text: "Bỏ qua", style: "cancel" },
+                    ]);
                 return;
             }
-            const currentList = JSON.parse(currentData);
-            // Merge with latest app info
-            const mergedList = currentList.map((widgetApp: any) => {
-                const latestApp = appsList.find((app: any) => app.packageName === widgetApp.packageName);
-                return latestApp || widgetApp;
-            });
-            await SystemModule.setListWidgetData(JSON.stringify(mergedList));
-        } catch (e) {
-            console.warn("Failed to sync widget data:", e);
+            const has = Boolean(await ShizukuModule.hasPermission());
+            setShizukuHasPermission(has);
+            if (!has && showPrompts) {
+                Alert.alert("Yêu cầu ủy quyền", "Vui lòng ủy quyền Shizuku cho ứng dụng này!", [
+                    {
+                        text: "Ủy quyền",
+                        onPress: async () => {
+                            try { await ShizukuModule.requestPermission(); } catch { /* ignore */ }
+                        },
+                    },
+                    { text: "Bỏ qua", style: "cancel" },
+                ]);
+            } else if (has) {
+                await AppManagerWrapper.ensureBound();
+            }
+        } catch {
+            setShizukuAvailable(false);
+            setShizukuHasPermission(false);
         }
     }, []);
 
-    async function loadApps(showLoading = false) {
-        try {
-            if (showLoading) setLoading(true);
-            const list = await SystemModule.getAllApps();
-            setApps(list);
-            // Sync widget data with updated app info
-            await syncWidgetData(list);
-            // Update widget apps set
-            const widgetSet = (await getWidgetAppsSet()) as Set<string>;
-            setWidgetAppsSet(widgetSet);
-        } catch (e) {
-            console.error("Error loading apps:", e);
-        } finally {
-            if (showLoading) setLoading(false);
-        }
-    }
-
-    const onRefresh = useCallback(async () => {
-        setRefreshing(true);
-        try {
-            await loadApps(true);
-        } catch (e) {
-            console.warn(e);
-        } finally {
-            setRefreshing(false);
-        }
+    // ─── Effects ──────────────────────────────────────────────────────────────
+    useEffect(() => {
+        loadApps(true);
+        loadRootMode();
     }, []);
 
-    // filtered list by packageName (case-insensitive) and filters
+    useEffect(() => {
+        if (apps.length > 0 && !hasCheckedShizuku.current) {
+            hasCheckedShizuku.current = true;
+            checkShizuku(true);
+        }
+    }, [apps, checkShizuku]);
+
+    useEffect(() => {
+        const handler = (s: string) => { if (s === "active") checkShizuku(false); };
+        const anyAS = AppState as any;
+        const sub = anyAS.addEventListener?.("change", handler) ?? null;
+        return () => { try { sub?.remove?.() ?? anyAS.removeEventListener?.("change", handler); } catch { /* ignore */ } };
+    }, [checkShizuku]);
+
+    // ─── Derived state ────────────────────────────────────────────────────────
     const filteredApps = useMemo(() => {
-        let filtered = apps;
-        if (search && search.trim() !== "") {
+        let f = apps;
+        if (search.trim()) {
             const q = search.toLowerCase();
-            filtered = filtered.filter((a: any) => (a.packageName || "").toLowerCase().includes(q));
+            f = f.filter((a) =>
+                (a.packageName || "").toLowerCase().includes(q) ||
+                (a.appName || "").toLowerCase().includes(q)
+            );
         }
-        if (filters.disabled) {
-            filtered = filtered.filter((a: any) => !a.enabled);
-        }
-        if (filters.system) {
-            filtered = filtered.filter((a: any) => a.isSystemApp);
-        }
-        if (filters.inWidget) {
-            filtered = filtered.filter((a: any) => widgetAppsSet.has(a.packageName));
-        }
-        return filtered;
+        if (filters.disabled) f = f.filter((a) => !a.enabled);
+        if (filters.system)   f = f.filter((a) => a.isSystemApp);
+        if (filters.inWidget) f = f.filter((a) => widgetAppsSet.has(a.packageName));
+        return f;
     }, [apps, search, filters, widgetAppsSet]);
 
-    // check if all filtered apps are selected
-    const allSelected = useMemo(() => {
-        return (
-            filteredApps.length > 0 &&
-            filteredApps.every((app) => selectedApps.some((s) => s.packageName === app.packageName))
-        );
-    }, [filteredApps, selectedApps]);
+    const allSelected = useMemo(() =>
+        filteredApps.length > 0 &&
+        filteredApps.every((a) => selectedApps.some((s) => s.packageName === a.packageName)),
+        [filteredApps, selectedApps]
+    );
 
     const toggleSelectAll = useCallback(() => {
         if (allSelected) {
-            // deselect all filtered apps
             setSelectedApps((prev) => prev.filter((s) => !filteredApps.some((f) => f.packageName === s.packageName)));
         } else {
-            // select all filtered apps
             setSelectedApps((prev) => {
-                const newSelected = [...prev];
-                filteredApps.forEach((app) => {
-                    if (!newSelected.some((s) => s.packageName === app.packageName)) {
-                        newSelected.push(app);
-                    }
-                });
-                return newSelected;
+                const next = [...prev];
+                filteredApps.forEach((a) => { if (!next.some((s) => s.packageName === a.packageName)) next.push(a); });
+                return next;
             });
         }
     }, [allSelected, filteredApps]);
+
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        try { await loadApps(false); } finally { setRefreshing(false); }
+    }, [loadApps]);
 
     const renderItem = useCallback(
         ({ item }: { item: any }) => (
@@ -200,692 +474,339 @@ export default function AppsScreen() {
                 setSelectedApps={setSelectedApps}
                 selectedApps={selectedApps}
                 onLongPress={handleOpenSheetForApp}
+                isPending={pendingPkgs.has(item.packageName)}
             />
         ),
-        [selectedApps, setSelectedApps, handleOpenSheetForApp]
+        [selectedApps, handleOpenSheetForApp, pendingPkgs]
     );
 
-    const addToWidget = async (itemData: any) => {
-        try {
-            // 1. Lấy danh sách hiện tại từ SharedPreferences (nếu có)
-            const currentData = await SystemModule.getListWidgetData?.(); // [Tùy chọn] nếu bạn thêm method này
-            let currentList066 = [];
+    // Status bar
+    const statusColor =
+        shizukuAvailable === null ? theme.scale[8]
+        : shizukuAvailable ? (shizukuHasPermission ? theme.semantic.success : theme.semantic.warning)
+        : theme.semantic.error;
+    const statusLabel =
+        shizukuAvailable === null ? "Checking Shizuku..."
+        : shizukuAvailable ? (shizukuHasPermission ? "Shizuku Authorized" : "Shizuku Needs Permission")
+        : "Shizuku Not Installed";
 
-            if (currentData && currentData !== "null" && currentData !== "[]") {
-                try {
-                    currentList066 = JSON.parse(currentData);
-                } catch (e) {
-                    currentList066 = [];
-                }
-            }
-
-            // 2. Tạo map để loại trùng dựa trên packageName
-            const appMap = new Map();
-
-            // Thêm các app hiện có
-            currentList066.forEach((app: any) => {
-                if (app.packageName) {
-                    appMap.set(app.packageName, app);
-                }
-            });
-
-            // Thêm các app mới được chọn
-            [itemData].forEach((app) => {
-                if (app.packageName) {
-                    appMap.set(app.packageName, app);
-                }
-            });
-
-            // 3. Chuyển về array
-            const mergedList = Array.from(appMap.values());
-
-            // 4. Lưu lại
-            const res = await SystemModule.setListWidgetData(JSON.stringify(mergedList));
-
-            if (res) {
-                Toast.show({
-                    type: "success",
-                    text1: "Hoàn tất",
-                    text2: `Đã thêm ${[itemData].length} app vào widget (không trùng).`,
-                });
-            }
-        } catch (err) {
-            console.error("Lỗi thêm widget:", err);
-            Toast.show({
-                type: "error",
-                text1: "Lỗi",
-                text2: "Không thể thêm vào widget",
-            });
-        }
-    };
-
-    const removeFromWidget = async (packageName: string) => {
-        try {
-            const currentData = await SystemModule.getListWidgetData?.();
-            if (!currentData || currentData === "null" || currentData === "[]") {
-                return;
-            }
-            const currentList = JSON.parse(currentData);
-            const filteredList = currentList.filter((app: any) => app.packageName !== packageName);
-            await SystemModule.setListWidgetData(JSON.stringify(filteredList));
-            Toast.show({
-                type: "success",
-                text1: "Hoàn tất",
-                text2: "Đã xóa khỏi widget",
-            });
-            // Update widgetAppsSet
-            setWidgetAppsSet((prev) => {
-                const newSet = new Set(prev);
-                newSet.delete(packageName);
-                return newSet;
-            });
-        } catch (err) {
-            console.error("Lỗi xóa widget:", err);
-            Toast.show({
-                type: "error",
-                text1: "Lỗi",
-                text2: "Không thể xóa khỏi widget",
-            });
-        }
-    };
-
-    React.useEffect(() => {
-        loadApps(true);
-    }, []);
-
-    // consolidated Shizuku check: runs when apps load and when screen focuses
-    const checkShizuku = useCallback(
-        async (showPrompts = true) => {
-            try {
-                const available = Boolean(await ShizukuModule.isShizukuAvailable());
-                setShizukuAvailable(available);
-
-                if (!available) {
-                    setShizukuHasPermission(false);
-                    if (showPrompts) {
-                        Alert.alert(
-                            "Yêu cầu Shizuku",
-                            "Ứng dụng này yêu cầu app 'Shizuku' để hoạt động. Vui lòng cài đặt Shizuku từ Play Store. Hoặc bật dịch vụ Shizuku nếu bạn đã cài đặt.",
-                            [
-                                { text: "Cài đặt", onPress: () => openPlayStore() },
-                                { text: "Bỏ qua", style: "cancel" },
-                            ]
-                        );
-                    }
-                    return;
-                }
-
-                const has = Boolean(await ShizukuModule.hasPermission());
-                setShizukuHasPermission(has);
-
-                if (!has && showPrompts) {
-                    Alert.alert("Yêu cầu ủy quyền", "Vui lòng ủy quyền Shizuku cho ứng dụng này!", [
-                        {
-                            text: "Ủy quyền",
-                            onPress: async () => {
-                                try {
-                                    // requestPermission may open Shizuku UI (external). Don't assume the return value
-                                    // represents the final state; re-check on app resume instead.
-                                    await ShizukuModule.requestPermission();
-                                } catch (err) {
-                                    console.error("Request permission error:", err);
-                                }
-                            },
-                        },
-                        { text: "Bỏ qua", style: "cancel" },
-                    ]);
-                } else if (has) {
-                    await AppManagerWrapper.ensureBound();
-                }
-            } catch (err) {
-                console.warn("Shizuku check failed:", err);
-                setShizukuAvailable(false);
-                setShizukuHasPermission(false);
-            }
-        },
-        [openPlayStore]
-    );
-
-    React.useEffect(() => {
-        // show prompts once when apps are first loaded so user can install/grant Shizuku
-        if (apps.length > 0) checkShizuku(true);
-    }, [apps, checkShizuku]);
-
-    // Re-check Shizuku when app returns to foreground (onResume behavior)
-    useEffect(() => {
-        const handler = (nextAppState: string) => {
-            if (nextAppState === "active") {
-                // when app becomes active again, re-check and show prompts if needed
-                checkShizuku(true);
-            }
-        };
-
-        // Use (AppState as any) to support different RN versions without TS errors
-        const anyAppState = AppState as any;
-        const sub = anyAppState.addEventListener ? anyAppState.addEventListener("change", handler) : null;
-
-        return () => {
-            try {
-                if (sub && typeof sub.remove === "function") {
-                    sub.remove();
-                } else if (anyAppState.removeEventListener) {
-                    anyAppState.removeEventListener("change", handler);
-                }
-            } catch (e) {
-                // ignore
-            }
-        };
-    }, [checkShizuku]);
-
+    // ─── Render ───────────────────────────────────────────────────────────────
     return (
-        <GestureHandlerRootView style={styles.container}>
+        <GestureHandlerRootView style={[styles.root, { backgroundColor: theme.scale[1] }]}>
             <LayoutScreen>
-                <Text
-                    style={{
-                        marginTop: 20,
-                        color: shizukuAvailable ? (shizukuHasPermission ? "#2e7d32" : "#f9a825") : "#d32f2f",
-                        fontWeight: "bold",
-                        fontSize: 18,
-                        marginStart: 18,
-                    }}
-                >
-                    {shizukuAvailable === null
-                        ? "Checking Shizuku..."
-                        : shizukuAvailable
-                        ? shizukuHasPermission
-                            ? "Shizuku Authorized"
-                            : "Shizuku Needs Permission"
-                        : "Shizuku Not Installed"}
-                </Text>
-                <Text style={{ marginStart: 20, fontWeight: "bold", fontSize: 12, opacity: 0.2 }}>mwarevn</Text>
 
-                <View>
-                    <View
-                        style={{
-                            width: "100%",
-                            marginHorizontal: "auto",
-                            marginTop: 28,
-                            position: "relative",
-                        }}
-                    >
+                {/* ── Header ── */}
+                <View style={styles.header}>
+                    <View style={styles.headerTop}>
+                        <View>
+                            <Text style={[styles.statusLabel, { color: statusColor }]}>{statusLabel}</Text>
+                            <Text style={[styles.brand, { color: theme.scale[7] }]}>mwarevn</Text>
+                        </View>
+                        <TouchableOpacity
+                            onPress={toggleRootMode}
+                            style={[styles.rootToggle, {
+                                backgroundColor: rootMode ? theme.semantic.error + "22" : theme.scale[3],
+                            }]}
+                        >
+                            <Ionicons
+                                name={rootMode ? "shield" : "shield-outline"}
+                                size={16}
+                                color={rootMode ? theme.semantic.error : theme.scale[8]}
+                            />
+                            <Text style={[styles.rootToggleText, { color: rootMode ? theme.semantic.error : theme.scale[8] }]}>
+                                {rootMode ? "Root ON" : "Root"}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+
+                {/* ── Search ── */}
+                <View style={styles.searchWrapper}>
+                    <View style={[styles.searchBox, { backgroundColor: theme.scale[3] }]}>
+                        <Ionicons name="search" size={18} color={theme.scale[7]} style={styles.searchIcon} />
                         <TextInput
                             value={search}
                             onChangeText={setSearch}
-                            placeholder="Search by package name..."
-                            style={[styles.search, { paddingRight: 44 }]}
+                            placeholder="Tìm theo tên hoặc package..."
+                            placeholderTextColor={theme.scale[7]}
+                            style={[styles.searchInput, { color: theme.scale[10] }]}
                             autoCapitalize="none"
                             autoCorrect={false}
                             returnKeyType="search"
                         />
-                        <TouchableOpacity
-                            style={{
-                                position: "absolute",
-                                right: 28,
-                                top: 0,
-                                bottom: 0,
-                                justifyContent: "center",
-                                alignItems: "center",
-                                padding: 8,
-                            }}
-                        >
-                            <Ionicons name="search" size={20} color="#939393a5" />
-                        </TouchableOpacity>
+                        {search.length > 0 && (
+                            <TouchableOpacity onPress={() => setSearch("")} hitSlop={8}>
+                                <Ionicons name="close-circle" size={18} color={theme.scale[7]} />
+                            </TouchableOpacity>
+                        )}
                     </View>
-
-                    <Text style={{ marginTop: 8, marginStart: 32, fontSize: 11 }}>
-                        * {filteredApps.length}/{apps.length}
+                    <Text style={[styles.countLabel, { color: theme.scale[8] }]}>
+                        {filteredApps.length} / {apps.length}
+                        {pendingPkgs.size > 0 && ` · ${pendingPkgs.size} đang xử lý`}
                     </Text>
                 </View>
 
-                <View style={styles.filtersContainer}>
-                    <TouchableOpacity
-                        onPress={() => setFilters((prev) => ({ ...prev, disabled: !prev.disabled }))}
-                        style={[styles.filterButton, filters.disabled && styles.filterButtonActive]}
-                    >
-                        <Ionicons name="ban" size={16} color={filters.disabled ? "#fff" : "#666"} />
-                        <Text style={[styles.filterText, filters.disabled && styles.filterTextActive]}>Disabled</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        onPress={() => setFilters((prev) => ({ ...prev, system: !prev.system }))}
-                        style={[styles.filterButton, filters.system && styles.filterButtonActive]}
-                    >
-                        <Ionicons name="settings" size={16} color={filters.system ? "#fff" : "#666"} />
-                        <Text style={[styles.filterText, filters.system && styles.filterTextActive]}>System</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        onPress={() => setFilters((prev) => ({ ...prev, inWidget: !prev.inWidget }))}
-                        style={[styles.filterButton, filters.inWidget && styles.filterButtonActive]}
-                    >
-                        <Ionicons name="star" size={16} color={filters.inWidget ? "#fff" : "#666"} />
-                        <Text style={[styles.filterText, filters.inWidget && styles.filterTextActive]}>In Widget</Text>
-                    </TouchableOpacity>
+                {/* ── Filters ── */}
+                <View style={styles.filtersRow}>
+                    {(["disabled", "system", "inWidget"] as const).map((key) => {
+                        const labels  = { disabled: "Disabled", system: "System", inWidget: "In Widget" };
+                        const icons   = { disabled: "ban", system: "settings", inWidget: "star" } as const;
+                        const active  = filters[key];
+                        return (
+                            <TouchableOpacity
+                                key={key}
+                                onPress={() => setFilters((p) => ({ ...p, [key]: !p[key] }))}
+                                style={[styles.filterChip, {
+                                    backgroundColor: active ? theme.accent[0] : theme.scale[3],
+                                }]}
+                            >
+                                <Ionicons name={icons[key]} size={14} color={active ? theme.accent[11] : theme.scale[8]} />
+                                <Text style={[styles.filterChipText, { color: active ? theme.accent[11] : theme.scale[8] }]}>
+                                    {labels[key]}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
                 </View>
 
+                {/* ── List ── */}
                 {loading ? (
-                    <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-                        <ActivityIndicator size="large" color="#666" />
-                        <Text style={{ marginTop: 8, color: "#666" }}>Loading apps...</Text>
+                    <View style={styles.centered}>
+                        <ActivityIndicator size="large" color={theme.scale[8]} />
+                        <Text style={[styles.hint, { color: theme.scale[8] }]}>Loading apps...</Text>
                     </View>
-                ) : apps.length === 0 ? (
-                    <Text>Loading...</Text>
                 ) : filteredApps.length === 0 ? (
-                    <Text>No results for {`"${search}"`}</Text>
+                    <View style={styles.centered}>
+                        <Text style={[styles.hint, { color: theme.scale[8] }]}>
+                            {apps.length === 0 ? "Không có app nào" : `Không tìm thấy "${search}"`}
+                        </Text>
+                    </View>
                 ) : (
-                    <View style={{ flex: 1, paddingBottom: selectedApps.length > 0 ? 120 : 0, paddingHorizontal: 16 }}>
+                    <View style={[styles.listWrapper, { paddingBottom: selectedApps.length > 0 ? 128 : 0 }]}>
                         <FlatList
-                            ref={(r) => {
-                                listRef.current = r;
-                            }}
+                            ref={(r) => { listRef.current = r; }}
                             data={filteredApps}
                             refreshing={refreshing}
                             onRefresh={onRefresh}
-                            onScroll={({ nativeEvent }) => {
-                                const offsetY = nativeEvent.contentOffset?.y || 0;
-                                setShowScrollTop(offsetY > 200);
-                            }}
+                            onScroll={({ nativeEvent }) => setShowScrollTop((nativeEvent.contentOffset?.y ?? 0) > 200)}
                             scrollEventThrottle={16}
                             renderItem={renderItem}
                             keyExtractor={(item) => item.packageName}
-                            getItemLayout={(data, index) => ({
-                                length: 60,
-                                offset: 60 * index,
-                                index,
-                            })}
+                            getItemLayout={(_, index) => ({ length: 62, offset: 62 * index, index })}
                             initialNumToRender={20}
                             windowSize={11}
-                            removeClippedSubviews={true}
+                            removeClippedSubviews
                             maxToRenderPerBatch={20}
                         />
                     </View>
                 )}
 
-                {/* Scroll to top button */}
-                {showScrollTop ? (
+                {/* ── Scroll to top ── */}
+                {showScrollTop && (
                     <TouchableOpacity
-                        onPress={() => {
-                            try {
-                                listRef.current?.scrollToOffset({ offset: 0, animated: true });
-                            } catch (e) {
-                                console.warn(e);
-                            }
-                        }}
-                        style={{
-                            position: "absolute",
-                            right: 16,
-                            bottom: 16,
-                            backgroundColor: "#ffffffbc",
-                            borderRadius: 8,
-                            opacity: 0.85,
-                            width: 42,
-                            height: 42,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-
-                            shadowColor: "#ddd",
-                            shadowOffset: {
-                                width: 0,
-                                height: 1,
-                            },
-                            shadowOpacity: 0.2,
-                            shadowRadius: 1.41,
-                            elevation: 1,
-                        }}
+                        onPress={() => { try { listRef.current?.scrollToOffset({ offset: 0, animated: true }); } catch { /* ignore */ } }}
+                        style={[styles.scrollTopBtn, { backgroundColor: theme.scale[3] }]}
                     >
-                        <Ionicons name={"arrow-up"} color="#000" size={20} />
+                        <Ionicons name="arrow-up" color={theme.scale[10]} size={20} />
                     </TouchableOpacity>
-                ) : null}
+                )}
 
+                {/* ── Selection bar ── */}
                 {selectedApps.length > 0 && (
-                    <View style={[styles.selectionActions, { backgroundColor: Colors[theme ?? "light"].background }]}>
-                        <Text style={[styles.selectionText, { color: Colors[theme ?? "light"].text }]}>
-                            {selectedApps.length} selected
+                    <View style={[styles.selectionBar, { backgroundColor: theme.scale[2] }]}>
+                        <Text style={[styles.selectionTitle, { color: theme.scale[10] }]}>
+                            {selectedApps.length} đã chọn
                         </Text>
-                        <View style={styles.actionButtons}>
+                        <View style={styles.selectionBtns}>
                             <TouchableOpacity
                                 onPress={toggleSelectAll}
-                                style={[styles.actionButton, { backgroundColor: Colors[theme ?? "light"].background }]}
+                                style={[styles.selBtn, { backgroundColor: theme.scale[3] }]}
                             >
-                                <Ionicons
-                                    name={allSelected ? "checkbox" : "square-outline"}
-                                    size={20}
-                                    color={allSelected ? Colors[theme ?? "light"].tint : Colors[theme ?? "light"].icon}
-                                />
-                                <Text style={[styles.actionButtonText, { color: Colors[theme ?? "light"].text }]}>
-                                    {allSelected ? "Deselect All" : "Select All"}
+                                <Ionicons name={allSelected ? "checkbox" : "square-outline"} size={18} color={theme.scale[10]} />
+                                <Text style={[styles.selBtnText, { color: theme.scale[10] }]}>
+                                    {allSelected ? "Bỏ chọn" : "Tất cả"}
                                 </Text>
                             </TouchableOpacity>
+
                             <TouchableOpacity
-                                onPress={async () => {
-                                    runBatchAction(
-                                        selectedApps,
-                                        AppManagerWrapper.disablePackage,
-                                        "Đã vô hiệu hoá tất cả package đã chọn.",
-                                        "không thể vô hiệu hoá."
-                                    );
-                                }}
-                                style={[styles.actionButton, { backgroundColor: Colors[theme ?? "light"].background }]}
+                                onPress={runBatchDisable}
+                                style={[styles.selBtn, { backgroundColor: theme.scale[3] }]}
                             >
-                                <Ionicons name="ban-outline" size={20} color="grey" />
-                                <Text style={styles.actionButtonText}>Disable</Text>
+                                <Ionicons name="ban-outline" size={18} color={theme.scale[10]} />
+                                <Text style={[styles.selBtnText, { color: theme.scale[10] }]}>Disable</Text>
                             </TouchableOpacity>
+
                             <TouchableOpacity
-                                onPress={() =>
-                                    runBatchAction(
-                                        selectedApps,
-                                        AppManagerWrapper.uninstallPackage,
-                                        "Đã gỡ cài đặt tất cả package đã chọn.",
-                                        "không thể gỡ cài đặt."
-                                    )
-                                }
-                                style={[styles.actionButton, { backgroundColor: "#ffebee" }]}
+                                onPress={runBatchUninstall}
+                                style={[styles.selBtn, { backgroundColor: theme.semantic.error + "22" }]}
                             >
-                                <Ionicons name="trash" size={20} color="red" />
-                                <Text style={[styles.actionButtonText, { color: "red" }]}>Delete</Text>
+                                <Ionicons name="trash" size={18} color={theme.semantic.error} />
+                                <Text style={[styles.selBtnText, { color: theme.semantic.error }]}>
+                                    {rootMode ? "Force Xóa" : "Xóa"}
+                                </Text>
                             </TouchableOpacity>
                         </View>
                     </View>
                 )}
 
+                {/* ── Bottom Sheet ── */}
                 <BottomSheet
                     index={-1}
-                    detached={true}
-                    enablePanDownToClose={true}
-                    enableDynamicSizing={true}
-                    snapPoints={[200, "50%"]}
+                    detached
+                    enablePanDownToClose
+                    enableDynamicSizing
+                    snapPoints={[200, "58%"]}
                     ref={bottomSheetRef}
                     onChange={handleSheetChanges}
-                    animationConfigs={{
-                        duration: 150,
-                    }}
+                    animationConfigs={{ duration: 200 }}
+                    backgroundStyle={{ backgroundColor: theme.scale[2] }}
+                    handleIndicatorStyle={{ backgroundColor: theme.scale[5] }}
                     backdropComponent={useCallback(
                         (props: BottomSheetBackdropProps) => (
-                            <BottomSheetBackdrop
-                                {...props}
-                                disappearsOnIndex={-1}
-                                appearsOnIndex={0}
-                                pressBehavior="close"
-                            />
+                            <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} pressBehavior="close" />
                         ),
                         []
                     )}
                 >
-                    <BottomSheetView style={styles.contentContainer}>
+                    <BottomSheetView style={styles.sheetContent}>
                         {selectedApp ? (
-                            <View style={{ width: "100%", paddingHorizontal: 16 }}>
-                                {selectedApp.iconBase64 ? (
-                                    <View style={{ alignItems: "center", marginBottom: 8 }}>
+                            <View style={styles.sheetInner}>
+                                {/* App icon + info */}
+                                {selectedApp.iconBase64 && (
+                                    <View style={styles.sheetIconRow}>
                                         <Image
                                             source={{ uri: `data:image/png;base64,${selectedApp.iconBase64}` }}
-                                            style={{ width: 64, height: 64, borderRadius: 12 }}
+                                            style={styles.sheetIcon}
                                         />
                                     </View>
-                                ) : null}
-
-                                <Text style={{ fontWeight: "700", fontSize: 16, marginBottom: 8 }}>
+                                )}
+                                <Text style={[styles.sheetAppName, { color: theme.scale[11] }]}>
                                     {selectedApp.appName}
                                 </Text>
-                                <Text style={{ color: "#666", marginBottom: 12 }}>{selectedApp.packageName}</Text>
+                                <Text style={[styles.sheetPkg, { color: theme.scale[8] }]}>
+                                    {selectedApp.packageName}
+                                </Text>
 
-                                <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
+                                {/* Disable / Enable */}
+                                <View style={styles.sheetRow}>
                                     <TouchableOpacity
-                                        onPress={async () => {
-                                            try {
-                                                const pkg = selectedApp && selectedApp.packageName;
-                                                if (!pkg) {
-                                                    Toast.show({
-                                                        type: "error",
-                                                        text1: "Lỗi",
-                                                        text2: "Invalid package",
-                                                    });
-                                                    return;
-                                                }
-                                                await AppManagerWrapper.disablePackage(pkg);
-                                                Toast.show({
-                                                    type: "success",
-                                                    text1: "Hoàn tất",
-                                                    text2: "Đã vô hiệu hoá",
-                                                });
-                                            } catch (err) {
-                                                console.error(err);
-                                                Toast.show({
-                                                    type: "error",
-                                                    text1: "Lỗi",
-                                                    text2: "Không thể vô hiệu hoá",
-                                                });
-                                            } finally {
-                                                await loadApps(false);
-                                                closeSheet();
-                                            }
-                                        }}
-                                        style={{
-                                            flex: 1,
-                                            padding: 12,
-                                            backgroundColor: "#f0f0f0",
-                                            borderRadius: 8,
-                                            marginRight: 8,
-                                        }}
+                                        onPress={() => doDisable(selectedApp)}
+                                        style={[styles.sheetBtn, { backgroundColor: theme.scale[3], flex: 1, marginRight: 8 }]}
                                     >
-                                        <Text style={{ textAlign: "center" }}>Disable</Text>
+                                        <Ionicons name="ban-outline" size={18} color={theme.scale[9]} />
+                                        <Text style={[styles.sheetBtnText, { color: theme.scale[10] }]}>Disable</Text>
                                     </TouchableOpacity>
-
                                     <TouchableOpacity
-                                        onPress={async () => {
-                                            try {
-                                                const pkg = selectedApp && selectedApp.packageName;
-                                                if (!pkg) {
-                                                    Toast.show({
-                                                        type: "error",
-                                                        text1: "Lỗi",
-                                                        text2: "Invalid package",
-                                                    });
-                                                    return;
-                                                }
-                                                await AppManagerWrapper.enablePackage(pkg);
-                                                Toast.show({ type: "success", text1: "Hoàn tất", text2: "Đã bật lại" });
-                                            } catch (err) {
-                                                console.error(err);
-                                                Toast.show({ type: "error", text1: "Lỗi", text2: "Không thể bật" });
-                                            } finally {
-                                                await loadApps(false);
-                                                closeSheet();
-                                            }
-                                        }}
-                                        style={{ flex: 1, padding: 12, backgroundColor: "#f0f0f0", borderRadius: 8 }}
+                                        onPress={() => doEnable(selectedApp)}
+                                        style={[styles.sheetBtn, { backgroundColor: theme.scale[3], flex: 1 }]}
                                     >
-                                        <Text style={{ textAlign: "center" }}>Enable</Text>
+                                        <Ionicons name="checkmark-circle-outline" size={18} color={theme.semantic.success} />
+                                        <Text style={[styles.sheetBtnText, { color: theme.scale[10] }]}>Enable</Text>
                                     </TouchableOpacity>
                                 </View>
 
-                                <View style={{ height: 12 }} />
-
+                                {/* Force Stop */}
                                 <TouchableOpacity
-                                    onPress={async () => {
-                                        try {
-                                            const pkg = selectedApp && selectedApp.packageName;
-                                            if (!pkg) {
-                                                Toast.show({ type: "error", text1: "Lỗi", text2: "Invalid package" });
-                                                return;
-                                            }
-                                            await AppManagerWrapper.forceStopPackage(pkg);
-                                            Toast.show({ type: "success", text1: "Hoàn tất", text2: "Đã dừng" });
-                                        } catch (err) {
-                                            console.error(err);
-                                            Toast.show({ type: "error", text1: "Lỗi", text2: "Không thể dừng" });
-                                        } finally {
-                                            await loadApps(false);
-                                            closeSheet();
-                                        }
-                                    }}
-                                    style={{ padding: 12, backgroundColor: "#ffecb3", borderRadius: 8 }}
+                                    onPress={() => doForceStop(selectedApp)}
+                                    style={[styles.sheetBtn, { backgroundColor: theme.semantic.warning + "22" }]}
                                 >
-                                    <Text style={{ textAlign: "center" }}>Force Stop</Text>
+                                    <Ionicons name="stop-circle-outline" size={18} color={theme.semantic.warning} />
+                                    <Text style={[styles.sheetBtnText, { color: theme.semantic.warning }]}>Force Stop</Text>
                                 </TouchableOpacity>
-                                <View style={{ height: 12 }} />
 
+                                {/* Widget toggle */}
                                 <TouchableOpacity
                                     onPress={async () => {
                                         const pkg = selectedApp?.packageName;
                                         if (!pkg) return;
-                                        const inWidget = widgetAppsSet.has(pkg);
-                                        if (inWidget) {
+                                        closeSheet();
+                                        if (widgetAppsSet.has(pkg)) {
                                             await removeFromWidget(pkg);
                                         } else {
                                             await addToWidget(selectedApp);
                                         }
-                                        await loadApps(false);
-                                        closeSheet();
                                     }}
-                                    style={{ padding: 12, backgroundColor: "#f0f0f0", borderRadius: 8 }}
+                                    style={[styles.sheetBtn, { backgroundColor: theme.scale[3] }]}
                                 >
-                                    <Text style={{ textAlign: "center" }}>
-                                        {selectedApp && widgetAppsSet.has(selectedApp.packageName)
-                                            ? "Remove from Widget"
-                                            : "Add to Widget"}
+                                    <Ionicons
+                                        name={widgetAppsSet.has(selectedApp?.packageName) ? "star" : "star-outline"}
+                                        size={18}
+                                        color={theme.scale[9]}
+                                    />
+                                    <Text style={[styles.sheetBtnText, { color: theme.scale[10] }]}>
+                                        {widgetAppsSet.has(selectedApp?.packageName) ? "Xóa khỏi Widget" : "Thêm vào Widget"}
                                     </Text>
                                 </TouchableOpacity>
 
-                                <View style={{ height: 12 }} />
-
+                                {/* Uninstall */}
                                 <TouchableOpacity
-                                    onPress={async () => {
-                                        try {
-                                            const pkg = selectedApp && selectedApp.packageName;
-                                            if (!pkg) {
-                                                Toast.show({ type: "error", text1: "Lỗi", text2: "Invalid package" });
-                                                return;
-                                            }
-                                            await AppManagerWrapper.uninstallPackage(pkg);
-                                            Toast.show({ type: "success", text1: "Hoàn tất", text2: "Đã gỡ cài đặt" });
-                                        } catch (err) {
-                                            console.error(err);
-                                            Toast.show({ type: "error", text1: "Lỗi", text2: "Không thể gỡ cài đặt" });
-                                        } finally {
-                                            await loadApps(false);
-                                            closeSheet();
-                                        }
-                                    }}
-                                    style={{ padding: 12, backgroundColor: "#ffd6d6", borderRadius: 8 }}
+                                    onPress={() => doUninstall(selectedApp)}
+                                    style={[styles.sheetBtn, { backgroundColor: theme.semantic.error + "22" }]}
                                 >
-                                    <Text style={{ textAlign: "center", color: "#900" }}>Uninstall</Text>
+                                    <Ionicons name="trash-outline" size={18} color={theme.semantic.error} />
+                                    <Text style={[styles.sheetBtnText, { color: theme.semantic.error }]}>
+                                        {rootMode ? "Force Uninstall (Root)" : "Uninstall"}
+                                    </Text>
                                 </TouchableOpacity>
-                                <View style={{ height: 12 }} />
                             </View>
                         ) : (
-                            <Text>Không có app được chọn</Text>
+                            <Text style={{ color: theme.scale[8], padding: 24 }}>Không có app được chọn</Text>
                         )}
                     </BottomSheetView>
                 </BottomSheet>
+
             </LayoutScreen>
         </GestureHandlerRootView>
     );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: "transparent",
-    },
-    contentContainer: {
-        flex: 1,
-        alignItems: "center",
-    },
-    search: {
-        height: 40,
-        borderRadius: 8,
-        borderWidth: 0.3,
-        borderColor: "#ddd",
-        paddingHorizontal: 12,
-        backgroundColor: "#e9e9e9ff",
-        marginHorizontal: "auto",
-        width: "85%",
-    },
-    selectAllContainer: {
-        flexDirection: "row",
-        alignItems: "center",
-        marginTop: 12,
-        marginStart: 18,
-        paddingVertical: 8,
-        paddingHorizontal: 12,
-        backgroundColor: "#f5f5f5",
-        borderRadius: 8,
-        alignSelf: "flex-start",
-    },
-    selectAllText: {
-        marginLeft: 8,
-        fontSize: 14,
-        fontWeight: "600",
-        color: "#333",
-    },
-    selectionActions: {
-        position: "absolute",
-        bottom: 0,
-        left: 0,
-        right: 0,
-        backgroundColor: "#fff",
-        padding: 16,
-        borderTopWidth: 1,
-        borderTopColor: "#eee",
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 5,
-    },
-    selectionText: {
-        fontSize: 16,
-        fontWeight: "bold",
-        marginBottom: 12,
-        textAlign: "center",
-    },
-    actionButtons: {
-        flexDirection: "row",
-        justifyContent: "space-around",
-    },
-    actionButton: {
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: "#f0f0f0",
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        borderRadius: 8,
-        minWidth: 100,
-        justifyContent: "center",
-    },
-    actionButtonText: {
-        marginLeft: 8,
-        fontSize: 14,
-        fontWeight: "600",
-    },
-    filtersContainer: {
-        flexDirection: "row",
-        justifyContent: "space-around",
-        marginTop: 8,
-        marginHorizontal: 18,
-        gap: 8,
-        marginBottom: 4,
-    },
-    filterButton: {
-        flexDirection: "row",
-        alignItems: "center",
-        paddingVertical: 8,
-        paddingHorizontal: 12,
-        borderRadius: 8,
-        backgroundColor: "#f0f0f0",
-        borderWidth: 1,
-        borderColor: "#ddd",
-    },
-    filterButtonActive: {
-        backgroundColor: "#007AFF",
-        borderColor: "#007AFF",
-    },
-    filterText: {
-        marginLeft: 6,
-        fontSize: 12,
-        color: "#666",
-        fontWeight: "500",
-    },
-    filterTextActive: {
-        color: "#fff",
-    },
+    root: { flex: 1 },
+
+    // Header
+    header:        { marginTop: 20, marginHorizontal: 20, marginBottom: 4 },
+    headerTop:     { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+    statusLabel:   { fontWeight: "700", fontSize: 17 },
+    brand:         { fontSize: 11, fontWeight: "500", marginTop: 2 },
+    rootToggle:    { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, minHeight: 36 },
+    rootToggleText:{ fontSize: 13, fontWeight: "600" },
+
+    // Search
+    searchWrapper: { marginHorizontal: 20, marginTop: 20, marginBottom: 4 },
+    searchBox:     { flexDirection: "row", alignItems: "center", borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, minHeight: 44 },
+    searchIcon:    { marginRight: 8 },
+    searchInput:   { flex: 1, fontSize: 14, padding: 0, margin: 0 },
+    countLabel:    { fontSize: 11, marginTop: 6, marginLeft: 4 },
+
+    // Filters
+    filtersRow:      { flexDirection: "row", marginHorizontal: 20, marginTop: 10, marginBottom: 8, gap: 8 },
+    filterChip:      { flexDirection: "row", alignItems: "center", paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, gap: 6, minHeight: 36 },
+    filterChipText:  { fontSize: 12, fontWeight: "500" },
+
+    // States
+    centered:  { flex: 1, justifyContent: "center", alignItems: "center", gap: 8 },
+    hint:      { fontSize: 14 },
+    listWrapper: { flex: 1, paddingHorizontal: 12 },
+
+    // Scroll to top
+    scrollTopBtn: { position: "absolute", right: 16, bottom: 16, borderRadius: 999, width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+
+    // Selection bar
+    selectionBar:  { position: "absolute", bottom: 0, left: 0, right: 0, paddingHorizontal: 16, paddingVertical: 14, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
+    selectionTitle:{ fontSize: 13, fontWeight: "600", textAlign: "center", marginBottom: 10 },
+    selectionBtns: { flexDirection: "row", justifyContent: "space-around", gap: 8 },
+    selBtn:        { flexDirection: "row", alignItems: "center", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 999, gap: 6, minHeight: 44 },
+    selBtnText:    { fontSize: 13, fontWeight: "600" },
+
+    // Bottom Sheet
+    sheetContent:  { flex: 1, alignItems: "center", paddingBottom: 24 },
+    sheetInner:    { width: "100%", paddingHorizontal: 20, gap: 10 },
+    sheetIconRow:  { alignItems: "center", marginBottom: 4 },
+    sheetIcon:     { width: 64, height: 64, borderRadius: 16 },
+    sheetAppName:  { fontWeight: "700", fontSize: 17, textAlign: "center" },
+    sheetPkg:      { fontSize: 12, textAlign: "center", marginBottom: 4 },
+    sheetRow:      { flexDirection: "row" },
+    sheetBtn:      { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 14, paddingHorizontal: 20, borderRadius: 999, gap: 8, minHeight: 48 },
+    sheetBtnText:  { fontWeight: "600", fontSize: 15, textAlign: "center" },
 });

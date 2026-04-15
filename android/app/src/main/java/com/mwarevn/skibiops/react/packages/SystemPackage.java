@@ -7,6 +7,7 @@ import com.facebook.react.uimanager.ViewManager;
 import com.mwarevn.skibiops.react.modules.ShizukuModule;
 import com.mwarevn.skibiops.react.modules.AppManager;
 import com.mwarevn.skibiops.react.modules.AppManagerBinder;
+import com.mwarevn.skibiops.react.modules.RootModule;
 import com.mwarevn.skibiops.react.modules.SystemModule;
 
 import java.util.ArrayList;
@@ -21,6 +22,7 @@ public class SystemPackage implements ReactPackage {
         modules.add(new ShizukuModule(reactContext));
         modules.add(new AppManagerBinder(reactContext));
         modules.add(new AppManager(reactContext));
+        modules.add(new RootModule(reactContext));
         return modules;
     }
 

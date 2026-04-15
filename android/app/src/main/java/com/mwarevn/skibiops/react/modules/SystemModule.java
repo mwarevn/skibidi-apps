@@ -41,9 +41,30 @@ public class SystemModule extends ReactContextBaseJavaModule {
         return "SystemModule";
     }
 
+    private static final String PREFS_SETTINGS  = "APP_SETTINGS";
+    private static final String KEY_ROOT_MODE   = "root_mode";
+
     @ReactMethod
     public void getMessage(Promise promise) {
         promise.resolve("Xin chào từ Java!");
+    }
+
+    @ReactMethod
+    public void getRootMode(Promise promise) {
+        boolean enabled = reactContext
+                .getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_ROOT_MODE, false);
+        promise.resolve(enabled);
+    }
+
+    @ReactMethod
+    public void setRootMode(boolean enabled, Promise promise) {
+        reactContext
+                .getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_ROOT_MODE, enabled)
+                .apply();
+        promise.resolve(true);
     }
 
     private void updateWidgetAfterDataChange() {
@@ -67,11 +88,9 @@ public class SystemModule extends ReactContextBaseJavaModule {
         editor.putString("list_items", jsonData); // jsonData là JSONArray string, ví dụ: [{"title":"Item1"}]
         editor.apply();
 
-        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-            updateWidgetAfterDataChange();
-            promise.resolve(true);
-        }, 100);
         promise.resolve(true);
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
+                this::updateWidgetAfterDataChange, 100);
     }
 
     @ReactMethod
@@ -125,9 +144,11 @@ public class SystemModule extends ReactContextBaseJavaModule {
         try {
             PackageManager pm = reactContext.getPackageManager();
             List<PackageInfo> packages;
+            @SuppressWarnings("deprecation")
             int flags = PackageManager.GET_META_DATA |
                     PackageManager.GET_DISABLED_COMPONENTS |
                     PackageManager.MATCH_ALL |
+                    PackageManager.MATCH_UNINSTALLED_PACKAGES |
                     PackageManager.GET_SIGNING_CERTIFICATES;
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -139,12 +160,18 @@ public class SystemModule extends ReactContextBaseJavaModule {
             WritableArray appList = Arguments.createArray();
 
             for (PackageInfo pkg : packages) {
-//                if (pkg.applicationInfo == null) continue;
+                if (pkg.applicationInfo == null) continue;
 
                 ApplicationInfo appInfo = pkg.applicationInfo;
 
                 WritableMap appMap = Arguments.createMap();
-                appMap.putString("appName", pm.getApplicationLabel(appInfo).toString());
+                String appName;
+                try {
+                    appName = pm.getApplicationLabel(appInfo).toString();
+                } catch (Exception e) {
+                    appName = pkg.packageName;
+                }
+                appMap.putString("appName", appName);
                 appMap.putString("packageName", pkg.packageName);
                 appMap.putString("versionName", pkg.versionName != null ? pkg.versionName : "N/A");
                 appMap.putInt("versionCode", pkg.versionCode);
