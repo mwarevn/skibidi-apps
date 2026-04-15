@@ -207,41 +207,89 @@ export default function AppsScreen() {
         }
     }, [addPending, removePending, rootMode]);
 
-    const doUninstall = useCallback(async (app: any) => {
+    /** Thực thi disable từ uninstall dialog */
+    const doDisableFromUninstall = useCallback(async (app: any) => {
         const pkg = app.packageName;
         addPending([pkg]);
-        closeSheet();
         try {
-            const result = await AppManagerWrapper.uninstallPackage(pkg, rootMode);
-
-            // Root mode trả về object với strategy
-            if (rootMode && typeof result === "object") {
-                if (!result.success) {
-                    removePending([pkg]);
-                    Toast.show({ type: "error", text1: "Không thể gỡ", text2: result.error });
-                    return;
-                }
-                if (result.strategy === "disabled") {
-                    // App không xóa được APK — chỉ disabled, không xóa khỏi list
-                    patchApp(pkg, { enabled: false });
-                    await patchWidgetEntry(pkg, { enabled: false });
-                    removePending([pkg]);
-                    Toast.show({
-                        type: "warn",
-                        text1: "Đã vô hiệu hoá",
-                        text2: `${app.appName} không thể xóa hoàn toàn (app hệ thống), đã disable thay thế`,
-                    });
-                    return;
-                }
-            }
-
-            removeApp(pkg);
-            Toast.show({ type: "success", text1: "Đã gỡ", text2: app.appName });
+            await AppManagerWrapper.disablePackage(pkg, rootMode);
+            patchApp(pkg, { enabled: false });
+            await patchWidgetEntry(pkg, { enabled: false });
+            Toast.show({ type: "success", text1: "Đã vô hiệu hoá", text2: app.appName });
         } catch {
+            Toast.show({ type: "error", text1: "Lỗi", text2: `Không thể disable ${app.appName}` });
+        } finally {
             removePending([pkg]);
-            Toast.show({ type: "error", text1: "Lỗi", text2: `Không thể gỡ ${app.appName}` });
         }
-    }, [addPending, removePending, removeApp, patchApp, rootMode]);
+    }, [addPending, removePending, patchApp, rootMode]);
+
+    /** Force uninstall: thử mọi cách để xóa hoàn toàn (root hoặc Shizuku) */
+    const doForceUninstall = useCallback(async (app: any) => {
+        const pkg = app.packageName;
+        addPending([pkg]);
+        try {
+            const result = rootMode
+                ? await AppManagerWrapper.root.forceUninstallPackage(pkg)
+                : await AppManagerWrapper.shizuku.forceUninstallPackage(pkg);
+            if (!result.success) {
+                Toast.show({ type: "error", text1: "Không thể gỡ hoàn toàn", text2: result.error });
+                return;
+            }
+            removeApp(pkg);
+            Toast.show({ type: "success", text1: "Đã gỡ hoàn toàn", text2: app.appName });
+        } catch {
+            Toast.show({ type: "error", text1: "Lỗi", text2: `Force uninstall thất bại với ${app.appName}` });
+        } finally {
+            removePending([pkg]);
+        }
+    }, [addPending, removePending, removeApp, rootMode]);
+
+    const doUninstall = useCallback(async (app: any) => {
+        const pkg = app.packageName;
+
+        // Root mode: hiển thị dialog lựa chọn
+        if (rootMode) {
+            closeSheet();
+            Alert.alert(
+                "Gỡ cài đặt (Root)",
+                `Chọn phương thức gỡ cho "${app.appName}":`,
+                [
+                    { text: "Huỷ", style: "cancel" },
+                    {
+                        text: "Disable",
+                        style: "default",
+                        onPress: () => doDisableFromUninstall(app),
+                    },
+                    {
+                        text: "Force Uninstall",
+                        style: "destructive",
+                        onPress: () => doForceUninstall(app),
+                    },
+                ]
+            );
+            return;
+        }
+
+        // Shizuku mode: cũng hiển thị dialog lựa chọn
+        closeSheet();
+        Alert.alert(
+            "Gỡ cài đặt",
+            `Chọn phương thức gỡ cho "${app.appName}":`,
+            [
+                { text: "Huỷ", style: "cancel" },
+                {
+                    text: "Disable",
+                    style: "default",
+                    onPress: () => doDisableFromUninstall(app),
+                },
+                {
+                    text: "Force Uninstall",
+                    style: "destructive",
+                    onPress: () => doForceUninstall(app),
+                },
+            ]
+        );
+    }, [addPending, removePending, removeApp, patchApp, rootMode, doDisableFromUninstall, doForceUninstall]);
 
     // ─── Batch actions ────────────────────────────────────────────────────────
     /**
@@ -276,32 +324,45 @@ export default function AppsScreen() {
         }
     }, [selectedApps, addPending, removePending, patchApp, rootMode]);
 
-    const runBatchUninstall = useCallback(async () => {
-        const targets = [...selectedApps];
-        setSelectedApps([]);
+    const executeBatchUninstall = useCallback(async (targets: any[], strategy: "disable" | "force") => {
         addPending(targets.map((a) => a.packageName));
-
         let okCount = 0;
-        let disabledCount = 0;
         let failedCount = 0;
 
+        if (strategy === "disable") {
+            await Promise.allSettled(
+                targets.map(async (app) => {
+                    try {
+                        await AppManagerWrapper.disablePackage(app.packageName, rootMode);
+                        patchApp(app.packageName, { enabled: false });
+                        await patchWidgetEntry(app.packageName, { enabled: false });
+                        okCount++;
+                    } catch {
+                        failedCount++;
+                    } finally {
+                        removePending([app.packageName]);
+                    }
+                })
+            );
+            if (failedCount === 0) {
+                Toast.show({ type: "success", text1: `Đã disable ${okCount} app` });
+            } else {
+                Toast.show({ type: "warn", text1: `${okCount} disable được, ${failedCount} thất bại` });
+            }
+            return;
+        }
+
+        // Force uninstall (root hoặc Shizuku tuỳ rootMode)
         await Promise.allSettled(
             targets.map(async (app) => {
                 try {
-                    const result = await AppManagerWrapper.uninstallPackage(app.packageName, rootMode);
-                    if (rootMode && typeof result === "object") {
-                        if (!result.success) {
-                            failedCount++;
-                            removePending([app.packageName]);
-                            return;
-                        }
-                        if (result.strategy === "disabled") {
-                            disabledCount++;
-                            patchApp(app.packageName, { enabled: false });
-                            await patchWidgetEntry(app.packageName, { enabled: false });
-                            removePending([app.packageName]);
-                            return;
-                        }
+                    const result = rootMode
+                        ? await AppManagerWrapper.root.forceUninstallPackage(app.packageName)
+                        : await AppManagerWrapper.shizuku.forceUninstallPackage(app.packageName);
+                    if (!result.success) {
+                        failedCount++;
+                        removePending([app.packageName]);
+                        return;
                     }
                     okCount++;
                     removeApp(app.packageName);
@@ -312,16 +373,61 @@ export default function AppsScreen() {
             })
         );
 
-        if (failedCount === 0 && disabledCount === 0) {
-            Toast.show({ type: "success", text1: `Đã gỡ ${okCount} app` });
+        if (failedCount === 0) {
+            Toast.show({ type: "success", text1: `Đã gỡ hoàn toàn ${okCount} app` });
         } else {
-            const parts = [];
-            if (okCount > 0)      parts.push(`${okCount} đã gỡ`);
-            if (disabledCount > 0) parts.push(`${disabledCount} đã disable`);
-            if (failedCount > 0)   parts.push(`${failedCount} thất bại`);
+            const parts: string[] = [];
+            if (okCount > 0)    parts.push(`${okCount} đã gỡ`);
+            if (failedCount > 0) parts.push(`${failedCount} thất bại`);
             Toast.show({ type: "warn", text1: parts.join(", ") });
         }
-    }, [selectedApps, addPending, removePending, removeApp, patchApp, rootMode]);
+    }, [addPending, removePending, removeApp, patchApp, rootMode]);
+
+    const runBatchUninstall = useCallback(async () => {
+        const targets = [...selectedApps];
+        setSelectedApps([]);
+
+        // Root mode: hỏi chiến lược
+        if (rootMode) {
+            Alert.alert(
+                `Gỡ ${targets.length} app (Root)`,
+                "Chọn phương thức gỡ:",
+                [
+                    { text: "Huỷ", style: "cancel" },
+                    {
+                        text: "Disable tất cả",
+                        style: "default",
+                        onPress: () => executeBatchUninstall(targets, "disable"),
+                    },
+                    {
+                        text: "Force Uninstall",
+                        style: "destructive",
+                        onPress: () => executeBatchUninstall(targets, "force"),
+                    },
+                ]
+            );
+            return;
+        }
+
+        // Shizuku mode: cũng hiển thị dialog
+        Alert.alert(
+            `Gỡ ${targets.length} app`,
+            "Chọn phương thức gỡ:",
+            [
+                { text: "Huỷ", style: "cancel" },
+                {
+                    text: "Disable tất cả",
+                    style: "default",
+                    onPress: () => executeBatchUninstall(targets, "disable"),
+                },
+                {
+                    text: "Force Uninstall",
+                    style: "destructive",
+                    onPress: () => executeBatchUninstall(targets, "force"),
+                },
+            ]
+        );
+    }, [selectedApps, addPending, removePending, removeApp, rootMode, executeBatchUninstall]);
 
     // ─── Root mode ────────────────────────────────────────────────────────────
     const loadRootMode = useCallback(async () => {

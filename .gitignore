@@ -55,4 +55,4 @@ android/app/generated
 .claude
 .vscode
 .idea
-.project
+# .project

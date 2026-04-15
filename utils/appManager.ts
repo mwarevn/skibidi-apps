@@ -79,6 +79,10 @@ export type UninstallResult =
     | { success: true;  strategy: "full" | "user" | "keepdata" | "disabled" }
     | { success: false; error: string };
 
+export type ForceUninstallResult =
+    | { success: true;  strategy: "full" | "user" | "keepdata" }
+    | { success: false; error: string };
+
 /**
  * Parse kết quả từ RootModule.uninstallPackage:
  *   "ok:full:..."      → thành công, gỡ hoàn toàn
@@ -103,6 +107,19 @@ export const AppManagerWrapper = {
         enablePackage:    (pkg: string) => callShizuku("enablePackage",    pkg),
         forceStopPackage: (pkg: string) => callShizuku("forceStopPackage", pkg),
         uninstallPackage: (pkg: string) => callShizuku("uninstallPackage", pkg),
+        /**
+         * Force-uninstall qua ADB shell (Shizuku): revoke permissions → remove device-admin
+         * → multi-strategy pm uninstall → cmd package uninstall.
+         * Không fallback về disabled. Không cần root.
+         */
+        forceUninstallPackage: async (pkg: string): Promise<ForceUninstallResult> => {
+            try {
+                await callShizuku("forceUninstallPackage", pkg);
+                return { success: true, strategy: "full" };
+            } catch (e: any) {
+                return { success: false, error: e?.message ?? String(e) };
+            }
+        },
     },
 
     // ── Root methods (không qua Shizuku) ─────────────────────────────────────
@@ -115,6 +132,21 @@ export const AppManagerWrapper = {
             try {
                 const raw: string = await callRoot("uninstallPackage", pkg);
                 return parseRootUninstallResult(raw);
+            } catch (e: any) {
+                return { success: false, error: e?.message ?? String(e) };
+            }
+        },
+        /**
+         * Force uninstall: thử mọi cách để xóa hoàn toàn (mount remount, delete APK trực tiếp...).
+         * Không bao giờ fallback về "disabled" — nếu không xóa được thì trả về { success: false }.
+         */
+        forceUninstallPackage: async (pkg: string): Promise<ForceUninstallResult> => {
+            try {
+                const raw: string = await callRoot("forceUninstallPackage", pkg);
+                if (raw.startsWith("ok:full:"))     return { success: true, strategy: "full" };
+                if (raw.startsWith("ok:user:"))     return { success: true, strategy: "user" };
+                if (raw.startsWith("ok:keepdata:")) return { success: true, strategy: "keepdata" };
+                return { success: false, error: raw };
             } catch (e: any) {
                 return { success: false, error: e?.message ?? String(e) };
             }
