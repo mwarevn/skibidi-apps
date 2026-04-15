@@ -232,6 +232,153 @@ public class RootModule extends ReactContextBaseJavaModule {
         });
     }
 
+    /**
+     * Force-uninstall mạnh nhất có thể — KHÔNG bao giờ fallback về disabled.
+     *
+     * Chiến lược leo thang:
+     *  1. Revoke device admin triệt để (mọi user, mọi receiver phổ biến)
+     *  2. pm uninstall                      — full uninstall
+     *  3. pm uninstall --user 0             — user-space uninstall
+     *  4. pm uninstall -k --user 0          — keep-data uninstall
+     *  5. cmd package uninstall             — dùng cmd thay pm (Android 10+)
+     *  6. Xóa APK/OAT/ODEX trực tiếp       — remount partition rw → rm -rf
+     *  7. Nếu tất cả thất bại → reject (không disable)
+     */
+    @ReactMethod
+    public void forceUninstallPackage(String packageName, Promise promise) {
+        if (packageName == null || packageName.trim().isEmpty()) {
+            promise.reject("INVALID_PKG", "Package name is required");
+            return;
+        }
+
+        executor.execute(() -> {
+            String su = findSu();
+            if (su == null) {
+                promise.reject("NO_ROOT", "Root not available (su not found)");
+                return;
+            }
+
+            // ── Step 0: revoke device-admin từ mọi user + mọi receiver phổ biến ──
+            String[] adminReceivers = {
+                ".DeviceAdminReceiver", ".receiver.DeviceAdminReceiver",
+                ".admin.DeviceAdminReceiver", ".DeviceAdmin",
+                ".MDMDeviceAdminReceiver", ".policy.DeviceAdminReceiver"
+            };
+            // Lấy danh sách user trên thiết bị
+            String[] users = {"0", "10", "11", "12", "999"};
+            for (String user : users) {
+                for (String receiver : adminReceivers) {
+                    try { runAsRoot(su, "dpm remove-active-admin --user " + user + " " + packageName + receiver); } catch (Exception ignored) {}
+                }
+            }
+            // Revoke mọi quyền nguy hiểm để app không kháng cự
+            try { runAsRoot(su, "pm revoke " + packageName + " android.permission.BIND_DEVICE_ADMIN"); } catch (Exception ignored) {}
+            try { runAsRoot(su, "appops set " + packageName + " RUN_IN_BACKGROUND ignore"); } catch (Exception ignored) {}
+
+            // ── Step 1: force-stop + kill ──
+            try { runAsRoot(su, "am force-stop " + packageName); } catch (Exception ignored) {}
+            try { runAsRoot(su, "am kill " + packageName); } catch (Exception ignored) {}
+            // Thêm 300ms cho process kịp die
+            try { Thread.sleep(300); } catch (InterruptedException ignored) {}
+
+            // ── Strategy 1 — full uninstall ──
+            try {
+                String r = runAsRoot(su, "pm uninstall " + packageName);
+                promise.resolve("ok:full:" + r);
+                return;
+            } catch (Exception e) { Log.w(TAG, "force S1 failed: " + e.getMessage()); }
+
+            // ── Strategy 2 — user uninstall ──
+            try {
+                String r = runAsRoot(su, "pm uninstall --user 0 " + packageName);
+                promise.resolve("ok:user:" + r);
+                return;
+            } catch (Exception e) { Log.w(TAG, "force S2 failed: " + e.getMessage()); }
+
+            // ── Strategy 3 — keep-data ──
+            try {
+                String r = runAsRoot(su, "pm uninstall -k --user 0 " + packageName);
+                promise.resolve("ok:keepdata:" + r);
+                return;
+            } catch (Exception e) { Log.w(TAG, "force S3 failed: " + e.getMessage()); }
+
+            // ── Strategy 4 — cmd package (Android 10+) ──
+            try {
+                String r = runAsRoot(su, "cmd package uninstall " + packageName);
+                promise.resolve("ok:full:" + r);
+                return;
+            } catch (Exception e) { Log.w(TAG, "force S4 (cmd) failed: " + e.getMessage()); }
+
+            // ── Strategy 5 — xóa APK + OAT/ODEX trực tiếp ──
+            try {
+                String apkPath = getApkPath(su, packageName);
+                if (apkPath == null) {
+                    // Thử tìm qua dumpsys
+                    try {
+                        String dump = runAsRoot(su, "dumpsys package " + packageName + " | grep codePath");
+                        if (dump.contains("codePath=")) {
+                            apkPath = dump.split("codePath=")[1].split("\n")[0].trim() + "/base.apk";
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                if (apkPath != null) {
+                    String apkDir = apkPath.contains("/")
+                        ? apkPath.substring(0, apkPath.lastIndexOf('/'))
+                        : apkPath;
+
+                    // Xác định partition để remount
+                    String[] partitions = {"/system", "/vendor", "/product", "/system_ext", "/apex", "/data"};
+                    String matchedPartition = null;
+                    for (String p : partitions) {
+                        if (apkPath.startsWith(p)) { matchedPartition = p; break; }
+                    }
+
+                    if (matchedPartition != null) {
+                        try { runAsRoot(su, "mount -o remount,rw " + matchedPartition); } catch (Exception ignored) {}
+                    }
+
+                    // Xóa APK dir
+                    runAsRoot(su, "rm -rf \"" + apkDir + "\"");
+
+                    // Xóa OAT/ODEX tương ứng (nếu có)
+                    String pkgSimple = packageName.replace(".", "_");
+                    String[] oatPaths = {
+                        "/data/dalvik-cache/arm64/" + pkgSimple,
+                        "/data/dalvik-cache/arm/" + pkgSimple,
+                        "/system/app/" + pkgSimple,
+                        "/system/priv-app/" + pkgSimple,
+                        apkDir.replace("/app/", "/app/oat/") ,
+                        apkDir + "/oat"
+                    };
+                    for (String oat : oatPaths) {
+                        try { runAsRoot(su, "rm -rf \"" + oat + "\""); } catch (Exception ignored) {}
+                    }
+
+                    // Remount lại readonly
+                    if (matchedPartition != null) {
+                        try { runAsRoot(su, "mount -o remount,ro " + matchedPartition); } catch (Exception ignored) {}
+                    }
+
+                    // Thông báo PM cập nhật + clear data thừa
+                    try { runAsRoot(su, "pm clear " + packageName); } catch (Exception ignored) {}
+                    try { runAsRoot(su, "pm trim-caches 9999999999"); } catch (Exception ignored) {}
+                    try { runAsRoot(su, "cmd package reconcileSecondaryDexFiles " + packageName); } catch (Exception ignored) {}
+
+                    promise.resolve("ok:full:deleted_apk");
+                    return;
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "force S5 (delete APK) failed: " + e.getMessage());
+            }
+
+            // ── Tất cả thất bại — không disable, báo lỗi ──
+            Log.e(TAG, "forceUninstall: all strategies failed for " + packageName);
+            promise.reject("FORCE_UNINSTALL_FAILED",
+                "Không thể gỡ hoàn toàn " + packageName + ". APK có thể được bảo vệ bởi system hoặc DM-verity.");
+        });
+    }
+
     @ReactMethod
     public void disablePackage(String packageName, Promise promise) {
         executor.execute(() -> {

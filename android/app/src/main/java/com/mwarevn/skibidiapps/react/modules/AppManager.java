@@ -228,6 +228,25 @@ public class AppManager extends ReactContextBaseJavaModule {
         });
     }
 
+    /**
+     * Force-uninstall qua ADB shell (Shizuku) — multi-strategy, không fallback về disabled.
+     * Phù hợp với app có device-admin hoặc quyền cứng đầu (không cần root).
+     */
+    @ReactMethod
+    public void forceUninstallPackage(String packageName, Promise promise) {
+        if (!checkService(promise)) return;
+        executor.execute(() -> {
+            try {
+                getService().forceUninstallPackage(packageName);
+                promise.resolve("ok");
+            } catch (RemoteException e) {
+                String msg = e.getMessage() != null ? e.getMessage() : Log.getStackTraceString(e);
+                Log.e(TAG, "forceUninstallPackage failed", e);
+                promise.reject("FORCE_UNINSTALL_FAILED", msg);
+            }
+        });
+    }
+
 //    @Override
 //    public void onCatalystInstanceDestroy() {
 //        executor.shutdown();

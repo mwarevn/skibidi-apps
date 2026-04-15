@@ -218,6 +218,83 @@ public class AppManagerUserService extends IAppManagerService.Stub {
         runCommand(fallback);
     }
 
+    /**
+     * Force-uninstall qua ADB shell (Shizuku) — không dùng su, không fallback về disabled.
+     *
+     * Shizuku chạy với quyền ADB shell (uid=2000). Có thể:
+     *   - pm uninstall (full / --user 0 / -k)
+     *   - cmd package uninstall (Android 10+)
+     *   - dpm remove-active-admin (ADB có quyền này)
+     *   - pm revoke tất cả permissions
+     *
+     * Không thể xóa APK khỏi /system — nếu tất cả thất bại → throw RemoteException.
+     */
+    @Override
+    public void forceUninstallPackage(String packageName) throws RemoteException {
+        validatePackageName(packageName);
+        Log.i(TAG, "forceUninstallPackage (Shizuku): " + packageName);
+
+        // ── Prep: revoke all permissions ──
+        try { revokeAllPermissions(packageName); } catch (Exception ignored) {}
+
+        // ── Prep: remove device-admin (ADB shell có quyền dpm) ──
+        String[] adminReceivers = {
+            ".DeviceAdminReceiver", ".receiver.DeviceAdminReceiver",
+            ".admin.DeviceAdminReceiver", ".DeviceAdmin",
+            ".MDMDeviceAdminReceiver", ".policy.DeviceAdminReceiver"
+        };
+        for (String receiver : adminReceivers) {
+            try {
+                runCommand(Arrays.asList(
+                    "/system/bin/dpm", "remove-active-admin",
+                    "--user", "0",
+                    packageName + receiver
+                ));
+            } catch (Exception ignored) {}
+        }
+
+        // ── Prep: force-stop ──
+        try { forceStopPackage(packageName); } catch (Exception ignored) {}
+
+        // Ngủ 300ms để process kịp die
+        try { Thread.sleep(300); } catch (InterruptedException ignored) {}
+
+        // ── Strategy 1: full uninstall ──
+        try {
+            runCommand(Arrays.asList("/system/bin/pm", "uninstall", packageName));
+            Log.i(TAG, "forceUninstall S1 (full) success");
+            return;
+        } catch (RemoteException e) { Log.w(TAG, "forceUninstall S1 failed: " + e.getMessage()); }
+
+        // ── Strategy 2: user-scope uninstall ──
+        try {
+            runCommand(Arrays.asList("/system/bin/pm", "uninstall", "--user", "0", packageName));
+            Log.i(TAG, "forceUninstall S2 (--user 0) success");
+            return;
+        } catch (RemoteException e) { Log.w(TAG, "forceUninstall S2 failed: " + e.getMessage()); }
+
+        // ── Strategy 3: keep-data ──
+        try {
+            runCommand(Arrays.asList("/system/bin/pm", "uninstall", "-k", "--user", "0", packageName));
+            Log.i(TAG, "forceUninstall S3 (-k --user 0) success");
+            return;
+        } catch (RemoteException e) { Log.w(TAG, "forceUninstall S3 failed: " + e.getMessage()); }
+
+        // ── Strategy 4: cmd package uninstall (Android 10+) ──
+        try {
+            runCommand(Arrays.asList("/system/bin/cmd", "package", "uninstall", packageName));
+            Log.i(TAG, "forceUninstall S4 (cmd package) success");
+            return;
+        } catch (RemoteException e) { Log.w(TAG, "forceUninstall S4 failed: " + e.getMessage()); }
+
+        // ── Tất cả thất bại — ADB không thể xóa APK /system, cần root ──
+        Log.e(TAG, "forceUninstallPackage: all strategies failed for " + packageName);
+        throw new RemoteException(
+            "Không thể gỡ " + packageName + " qua Shizuku. " +
+            "App có thể là system app được bảo vệ — hãy dùng Root Mode."
+        );
+    }
+
     // ─── Root helpers ──────────────────────────────────────────────────────────
 
     /**
