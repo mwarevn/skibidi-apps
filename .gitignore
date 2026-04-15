@@ -41,3 +41,15 @@ app-example
 # generated native folders
 /ios
 #/android
+
+android/app/build
+android/build
+android/app/.cxx
+android/app/intermediates
+android/app/kotlin
+android/app/generated
+
+.claude
+.vscode
+.idea
+.project
